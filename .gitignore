@@ -1,0 +1,6 @@
+__pycache__/
+data.json
+settings.json
+log/*
+dist/
+src/cabinet.egg-info
