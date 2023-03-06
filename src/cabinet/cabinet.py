@@ -42,17 +42,17 @@ def main():
         PATH_CABINET = input(path_cabinet_msg)
 
     try:
-        with open(f'{PATH_CABINET}/settings.json', 'r+') as f:
-            f.seek(0, os.SEEK_END)
+        with open(f'{PATH_CABINET}/settings.json', 'r+') as file:
+            file.seek(0, os.SEEK_END)
     except:
         # initialize settings file if it doesn't exist
         if not os.path.exists(PATH_CABINET):
             os.makedirs(PATH_CABINET)
-        with open(f'{PATH_CABINET}/settings.json', 'x+') as f:
+        with open(f'{PATH_CABINET}/settings.json', 'x+') as file:
             print(
                 f"\n\nWarning: settings.json not found; created a blank one in {PATH_CABINET}")
             print("You can change this location by calling 'cabinet config'.\n\n")
-            f.write('{}')
+            file.write('{}')
 
     try:
         SETTINGS = json.load(open(f'{PATH_CABINET}/settings.json'))
@@ -66,8 +66,8 @@ def main():
             os.system(
                 f"touch {PATH_CABINET}/settings-backup.json && cp {PATH_CABINET}/settings.json {PATH_CABINET}/settings-backup.json")
             print(f"Backed up to {PATH_CABINET}/settings-backup.json")
-            with open(f'{PATH_CABINET}/settings.json', 'w+') as f:
-                f.write('{}')
+            with open(f'{PATH_CABINET}/settings.json', 'w+') as file:
+                file.write('{}')
             print("Done. Please try your last command again.")
         else:
             print(
@@ -113,11 +113,11 @@ def edit(path, create_if_not_exist=False):
     file_name = path.split("/")[-1]
     if os.path.exists(path):
         file_contents = get_file_as_array(
-            file_name, path_notes_local=file_path)
+            file_name, file_path=file_path)
 
     os.system(f"vim {path}")
 
-    if get_file_as_array(file_name, path_notes_local=file_path) == file_contents:
+    if get_file_as_array(file_name, file_path=file_path) == file_contents:
         print("No changes.")
 
 
@@ -181,37 +181,37 @@ def put(*attribute, value=None, fileName='settings.json'):
     return value
 
 
-def get_file_as_array(item, path_notes_local=None, strip=True, ignore_not_found=False):
+def get_file_as_array(item, file_path=None, strip=True, ignore_not_found=False):
     """
     Returns the file as an array; strips using strip() unless strip is set to False
     """
 
-    if path_notes_local is None:
-        path_notes_local = PATH_LOG
-    elif path_notes_local == "notes":
-        path_notes_local = get('path', 'notes', 'local')
+    if file_path is None:
+        file_path = PATH_LOG
+    elif file_path == "notes":
+        file_path = get('path', 'notes', 'local')
 
-        if not path_notes_local[-1] == '/':
-            path_notes_local += '/'
+        if not file_path[-1] == '/':
+            file_path += '/'
 
     try:
 
-        if not path_notes_local[-1] == '/':
-            path_notes_local += '/'
+        if not file_path[-1] == '/':
+            file_path += '/'
 
-        content = open(path_notes_local + item, "r").read()
+        content = open(file_path + item, "r").read()
 
         if strip is not False:
             content = content.strip()
 
         return content.split('\n')
-    except Exception as e:
-        if not ignore_not_found or e.__class__ != FileNotFoundError:
-            log(f"getFileAsArray: {e}", level="error")
+    except Exception as error:
+        if not ignore_not_found or error.__class__ != FileNotFoundError:
+            log(f"getFileAsArray: {error}", level="error")
         return ""
 
 
-def writeFile(file_name, file_path=None, content=None, append=False, is_quiet=False):
+def write_file(file_name, file_path=None, content=None, append=False, is_quiet=False):
     """
     Writes a file to the specified path and creates subfolders if necessary
     """
