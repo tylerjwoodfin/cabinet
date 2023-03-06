@@ -1,3 +1,7 @@
+"""
+The main module for file management
+"""
+
 import os
 import json
 import pathlib
@@ -8,6 +12,10 @@ from datetime import date
 IS_INITIALIZED = False
 
 def main():
+    """
+    Loads the settings.json file
+    """
+
     global PATH_CABINET
     global PATH_LOG
     global PATH_CONFIG_FILE
@@ -25,7 +33,7 @@ def main():
 
     # Determines where settings.json is stored; by default, this is ~/cabinet
     PATH_CABINET = os.path.expanduser(
-        getConfigItem('path_cabinet'))
+        get_config('path_cabinet'))
 
     if not PATH_CABINET:
         path_cabinet_msg = """Enter the directory to store settings.json.\n"""\
@@ -67,9 +75,9 @@ def main():
 
         sys.exit(-1)
 
-    PATH_LOG = getItem('path', 'log')
+    PATH_LOG = get('path', 'log')
     if PATH_LOG == None:
-        PATH_LOG = setItem(
+        PATH_LOG = put(
             'path', 'log', f"{PATH_CABINET}/log", fileName='settings.json')
         print(
             f"\n\nCalling cabinet.log in Python will now write to {PATH_CABINET}/log by default.")
@@ -81,52 +89,21 @@ def main():
 
     IS_INITIALIZED = True
 
-
-"""
-Pull from the cloud using the command of your choice.
-"""
-
-
-def pull():
-    _sync = getItem("path", "cabinet")
-    _sync_keys = _sync.keys()
-
-    PULL_COMMAND = ''
-    if 'sync-pull' in _sync_keys and 'sync-push' in _sync_keys:
-        PULL_COMMAND = _sync['sync-pull']
-
-    if PULL_COMMAND:
-        print(f"Pulling {PATH_CABINET}/settings.json from cloud...")
-        os.system(PULL_COMMAND)
-        print("Pulled.")
-        SETTINGS = json.load(open(f'{PATH_CABINET}/settings.json'))
-
-
-"""
-Edit and save a file using Vim
-Allows for shortcuts by setting paths in settings.json -> path -> edit
-settings.json -> path -> edit -> sync is reserved for the command to be run to sync files
-"""
-
-
-def editFile(path, sync=False, createIfNotExist=False):
+def edit(path, create_if_not_exist=False):
+    """
+    Edit and save a file using Vim
+    Allows for shortcuts by setting paths in settings.json -> path -> edit
+    """
     # allows for shortcuts by setting paths in settings.json -> path -> edit
-    if path in getItem("path", "edit"):
-        item = getItem("path", "edit", path)
+    if path in get("path", "edit"):
+        item = get("path", "edit", path)
         if isinstance(item) != dict or "value" not in item.keys():
             log(
-                f"Could not use shortcut for {path} in getItem(path -> edit); should be a JSON object with value, sync attributes", level="warn")
+                f"Could not use shortcut for {path} in getItem(path -> edit); should be a JSON object with value", level="warn")
         else:
             path = item["value"]
-            sync = ("sync" in item.keys() and item["sync"]) or False
 
-    pull_command = getItem("path", "edit", "sync-pull")
-    if pull_command and sync:
-        print(f"Pulling {path} from cloud...")
-        os.system(pull_command)
-        print("Pulled.")
-
-    if not createIfNotExist and not os.path.exists(path):
+    if not create_if_not_exist and not os.path.exists(path):
         print(f"File does not exist: {path}")
         return -1
 
@@ -135,36 +112,22 @@ def editFile(path, sync=False, createIfNotExist=False):
     file_path = '/'.join(path.split("/")[:-1])
     file_name = path.split("/")[-1]
     if os.path.exists(path):
-        file_contents = getFileAsArray(
-            file_name, filePath=file_path)
+        file_contents = get_file_as_array(
+            file_name, path_notes_local=file_path)
 
     os.system(f"vim {path}")
 
-    if getFileAsArray(file_name, filePath=file_path) == file_contents:
+    if get_file_as_array(file_name, path_notes_local=file_path) == file_contents:
         print("No changes.")
-        sync = False
-
-    push_command = getItem("path", "edit", "sync-push")
-    if push_command and sync:
-        print(f"Saving {path} to cloud...")
-        os.system(push_command)
-        print("Saved.")
 
 
-"""
-Returns a property in settings.json.
-Usage: get('person', 'name')
-"""
+def get(*attribute, warn=False):
+    """
+    Returns a property in settings.json.
+    Usage: get('person', 'name')
+    """
 
-
-def getItem(*attribute, warn=False, sync=False):
-
-    if sync:
-        pull()
-
-    global SETTINGS
-
-    if SETTINGS == None:
+    if SETTINGS is None:
         return None
 
     _settings = SETTINGS
@@ -181,22 +144,15 @@ def getItem(*attribute, warn=False, sync=False):
 
     return _settings
 
-
-"""
-Sets a property in settings.json (or some other `fileName`).
-Usage: set('person', 'name', 'Tyler')
-The last argument is the value to set, unless value is specified.
-Returns the value set.
-"""
-
-
-def setItem(*attribute, value=None, fileName='settings.json', sync=False):
-
-    global SETTINGS
+def put(*attribute, value=None, fileName='settings.json'):
+    """
+    Sets a property in settings.json (or some other `fileName`).
+    Usage: set('person', 'name', 'Tyler')
+    The last argument is the value to set, unless value is specified.
+    Returns the value set.
+    """
+    
     path_full = f"{PATH_CABINET}/{fileName}"
-
-    if sync:
-        pull()
 
     if not value:
         value = attribute[-1]
@@ -222,95 +178,71 @@ def setItem(*attribute, value=None, fileName='settings.json', sync=False):
     with open(path_full, 'w+') as file:
         json.dump(_settings, file, indent=4)
 
-    push_command = getItem("path", "cabinet", "sync-push")
-    if push_command and sync:
-        print(f"Pushing {PATH_CABINET}/settings.json to cloud...")
-        os.system(push_command)
-        print("Saved.")
-
     return value
 
 
-def getFileAsArray(item, filePath=None, strip=True, ignoreNotFound=False):
+def get_file_as_array(item, path_notes_local=None, strip=True, ignore_not_found=False):
     """
     Returns the file as an array; strips using strip() unless strip is set to False
     """
 
-    global PATH_LOG
-    if filePath == None:
-        filePath = PATH_LOG
-    elif filePath == "notes":
-        filePath = getItem('path', 'notes', 'local')
+    if path_notes_local is None:
+        path_notes_local = PATH_LOG
+    elif path_notes_local == "notes":
+        path_notes_local = get('path', 'notes', 'local')
 
-        if not filePath[-1] == '/':
-            filePath += '/'
-
-        # pull from cloud
-        if getItem('path', 'notes', 'cloud', warn=False):
-            try:
-                os.system(
-                    f"rclone copy {getItem('path', 'notes', 'cloud')} {filePath}")
-            except Exception as e:
-                log(f"Could not pull Notes from cloud: {e}", level="error")
+        if not path_notes_local[-1] == '/':
+            path_notes_local += '/'
 
     try:
 
-        if not filePath[-1] == '/':
-            filePath += '/'
+        if not path_notes_local[-1] == '/':
+            path_notes_local += '/'
 
-        content = open(filePath + item, "r").read()
+        content = open(path_notes_local + item, "r").read()
 
         if strip is not False:
             content = content.strip()
 
         return content.split('\n')
     except Exception as e:
-        if not ignoreNotFound or e.__class__ != FileNotFoundError:
+        if not ignore_not_found or e.__class__ != FileNotFoundError:
             log(f"getFileAsArray: {e}", level="error")
         return ""
 
 
-def writeFile(fileName, filePath=None, content=None, append=False, is_quiet=False):
+def writeFile(file_name, file_path=None, content=None, append=False, is_quiet=False):
     """
     Writes a file to the specified path and creates subfolders if necessary
     """
 
-    global PATH_LOG
-    _filePath = filePath
+    if file_path is None:
+        file_path = PATH_LOG[0:-1] if PATH_LOG.endswith("/") else PATH_LOG
+    elif file_path == "notes":
+        file_path = get('path', 'notes', 'local')
 
-    if filePath == None:
-        filePath = PATH_LOG[0:-1] if PATH_LOG.endswith("/") else PATH_LOG
-    elif filePath == "notes":
-        filePath = getItem('path', 'notes', 'local')
-
-    if content == None:
+    if content is None:
         content = ""
 
-    if not os.path.exists(filePath):
-        os.makedirs(filePath)
+    if not os.path.exists(file_path):
+        os.makedirs(file_path)
 
-    with open(filePath + "/" + fileName, 'w+' if not append else 'a+') as file:
+    with open(file_path + "/" + file_name, 'w+' if not append else 'a+') as file:
         file.write(content)
 
         if not is_quiet:
-            print(f"Wrote to '{filePath}/{fileName}'")
-
-    # push to cloud
-    if _filePath == "notes" and getItem('path', 'notes', 'cloud', warn=False):
-        try:
-            os.system(
-                f"rclone copy {filePath} {getItem('path', 'notes', 'cloud')}")
-        except Exception as e:
-            log(f"Could not sync Notes to cloud: {e}", level="error")
+            print(f"Wrote to '{file_path}/{file_name}'")
 
 
-def getConfigItem(key=None):
-    global PATH_CONFIG_FILE
+def get_config(key=None):
+    """
+    Gets a property from the internal configuration file
+    """
 
     try:
         with open(PATH_CONFIG_FILE, 'r+') as file:
             return json.load(file)[key]
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         if key == 'path_cabinet':
             # set default settings.json and log path to ~/cabinet
             path_cabinet_msg = """Enter the directory to store settings.json.\n"""\
@@ -318,12 +250,12 @@ def getConfigItem(key=None):
                 f"""such as {pathlib.Path.home().resolve()}/cabinet.\n\n"""
 
             PATH_CABINET = input(path_cabinet_msg)
-            setConfigItem(key, PATH_CABINET)
+            put_config(key, PATH_CABINET)
             return PATH_CABINET
     except KeyError:
         print(f"Warning: Key error for key: {key}")
         return ""
-    except json.decoder.JSONDecodeError as e:
+    except json.decoder.JSONDecodeError:
         response = input(
             f"The config file ({PATH_CONFIG_FILE}) is not valid JSON. Do you want to replace it with an empty JSON file?  (you will lose existing data) (y/n)\n")
         if response.lower().startswith("y"):
@@ -336,12 +268,10 @@ def getConfigItem(key=None):
         sys.exit(-1)
 
 
-def setConfigItem(key=None, value=None):
+def put_config(key=None, value=None):
     """
     Updates the internal configuration file
     """
-
-    global PATH_CONFIG_FILE
 
     if value == "":
         print("No changes were made.")
@@ -380,31 +310,31 @@ def setConfigItem(key=None, value=None):
     return value
 
 
-def getLogger(logName=None, level=logging.INFO, filePath=None, is_quiet=False):
+def get_logger(log_name=None, level=logging.INFO, file_path=None, is_quiet=False):
     """
     Returns a custom logger with the given name and level
     """
 
     today = str(date.today())
 
-    if filePath == None:
-        filePath = f"{PATH_LOG}{today}"
-    if logName == None:
-        logName = f"LOG_DAILY {today}"
+    if file_path is None:
+        file_path = f"{PATH_LOG}{today}"
+    if log_name is None:
+        log_name = f"LOG_DAILY {today}"
 
     # create path if necessary
-    if not os.path.exists(filePath):
-        print(f"Creating {filePath}")
-        os.makedirs(filePath)
+    if not os.path.exists(file_path):
+        print(f"Creating {file_path}")
+        os.makedirs(file_path)
 
-    logger = logging.getLogger(logName)
+    logger = logging.getLogger(log_name)
 
     logger.setLevel(level)
 
     if logger.handlers:
         logger.handlers = []
 
-    format_string = ("%(asctime)s — %(levelname)s — %(message)s")
+    format_string = "%(asctime)s — %(levelname)s — %(message)s"
     log_format = logging.Formatter(format_string)
 
     if not is_quiet:
@@ -412,41 +342,44 @@ def getLogger(logName=None, level=logging.INFO, filePath=None, is_quiet=False):
         console_handler.setFormatter(log_format)
         logger.addHandler(console_handler)
 
-    file_handler = logging.FileHandler(f"{filePath}/{logName}.log", mode='a')
+    file_handler = logging.FileHandler(f"{file_path}/{log_name}.log", mode='a')
     file_handler.setFormatter(log_format)
 
     logger.addHandler(file_handler)
     return logger
 
 
-def log(message=None, logName=None, level="info", filePath=None, is_quiet=False):
+def log(message=None, log_name=None, level="info", file_path=None, is_quiet=False):
+    """
+    Logs a message
+    """
 
-    if message == None:
+    if message is None:
         message = ""
 
-    if level == None or level == "info":
-        logger = getLogger(
-            logName=logName, level=logging.INFO, filePath=filePath, is_quiet=is_quiet)
+    if level is None or level == "info":
+        logger = get_logger(
+            log_name=log_name, level=logging.INFO, file_path=file_path, is_quiet=is_quiet)
         logger.info(message)
     elif level == "debug":
-        logger = getLogger(
-            logName=logName, level=logging.DEBUG, filePath=filePath, is_quiet=is_quiet)
+        logger = get_logger(
+            log_name=log_name, level=logging.DEBUG, file_path=file_path, is_quiet=is_quiet)
         logger.debug(message)
     elif level == "warn" or level == "warning":
-        logger = getLogger(
-            logName=logName, level=logging.WARN, filePath=filePath, is_quiet=is_quiet)
+        logger = get_logger(
+            log_name=log_name, level=logging.WARN, file_path=file_path, is_quiet=is_quiet)
         logger.warning(message)
     elif level == "error":
-        logger = getLogger(
-            logName=logName, level=logging.ERROR, filePath=filePath, is_quiet=is_quiet)
+        logger = get_logger(
+            log_name=log_name, level=logging.ERROR, file_path=file_path, is_quiet=is_quiet)
         logger.error(message)
     elif level == "critical":
-        logger = getLogger(
-            logName=logName, level=logging.CRITICAL, filePath=filePath, is_quiet=is_quiet)
+        logger = get_logger(
+            log_name=log_name, level=logging.CRITICAL, file_path=file_path, is_quiet=is_quiet)
         logger.critical(message)
     else:
-        logger = getLogger(
-            logName=logName, level=logging.ERROR, filePath=filePath, is_quiet=is_quiet)
+        logger = get_logger(
+            log_name=log_name, level=logging.ERROR, file_path=file_path, is_quiet=is_quiet)
         logger.error(f"Unknown log level: {level}; using ERROR")
         logger.error(message)
 
@@ -459,11 +392,11 @@ if __name__ == "__main__":
 
 if "cabinet" in sys.argv[0] and len(sys.argv) > 1:
     if sys.argv[-1] == 'config':
-        setConfigItem('path_cabinet', input(
+        put_config('path_cabinet', input(
             f"Enter the full path of the directory where you want to store all data (currently {PATH_CABINET}):\n"))
 
     if sys.argv[1] == 'edit':
         if len(sys.argv) > 2:
-            editFile(sys.argv[2])
+            edit(sys.argv[2])
         else:
-            editFile(f"{PATH_CABINET}/settings.json")
+            edit(f"{PATH_CABINET}/settings.json")
