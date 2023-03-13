@@ -97,7 +97,7 @@ def edit(path, create_if_not_exist=False):
     # allows for shortcuts by setting paths in settings.json -> path -> edit
     if path in get("path", "edit"):
         item = get("path", "edit", path)
-        if isinstance(item) != dict or "value" not in item.keys():
+        if not isinstance(item, dict) or "value" not in item.keys():
             log(
                 f"Could not use shortcut for {path} in getItem(path -> edit); should be a JSON object with value", level="warn")
         else:
