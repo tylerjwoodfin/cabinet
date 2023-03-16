@@ -42,31 +42,37 @@ def main():
         PATH_CABINET = input(path_cabinet_msg)
 
     try:
-        with open(f'{PATH_CABINET}/settings.json', 'r+') as file:
+        with open(f'{PATH_CABINET}/settings.json', 'r+', encoding="utf8") as file:
             file.seek(0, os.SEEK_END)
-    except:
+    except FileNotFoundError as error:
         # initialize settings file if it doesn't exist
         if not os.path.exists(PATH_CABINET):
             os.makedirs(PATH_CABINET)
-        with open(f'{PATH_CABINET}/settings.json', 'x+') as file:
-            print(
-                f"\n\nWarning: settings.json not found; created a blank one in {PATH_CABINET}")
+        with open(f'{PATH_CABINET}/settings.json', 'x+', encoding="utf8") as file:
+            print(f"\n\nWarning: settings.json not found; \
+                created a blank one in {PATH_CABINET} ({error})")
             print("You can change this location by calling 'cabinet config'.\n\n")
             file.write('{}')
 
     try:
-        SETTINGS = json.load(open(f'{PATH_CABINET}/settings.json'))
-    except json.decoder.JSONDecodeError as e:
+        SETTINGS = json.load(open(f'{PATH_CABINET}/settings.json', encoding="utf8"))
+    except json.decoder.JSONDecodeError as error:
+
+        print(f"{error}\n")
+
         response = input(
-            f"The settings file ({PATH_CABINET}/settings.json) is not valid JSON. Do you want to replace it with an empty JSON file? (The existing file will be backed up in {PATH_CABINET}) (y/n)\n")
+            f"The settings file ({PATH_CABINET}/settings.json) is not valid JSON. \
+                Do you want to replace it with an empty JSON file? \
+                    (The existing file will be backed up in {PATH_CABINET}) (y/n)\n")
         if response.lower().startswith("y"):
             print("Backing up...")
 
             # for some reason, this only works when you call touch; TODO fix this
             os.system(
-                f"touch {PATH_CABINET}/settings-backup.json && cp {PATH_CABINET}/settings.json {PATH_CABINET}/settings-backup.json")
+                f"touch {PATH_CABINET}/settings-backup.json \
+                    && cp {PATH_CABINET}/settings.json {PATH_CABINET}/settings-backup.json")
             print(f"Backed up to {PATH_CABINET}/settings-backup.json")
-            with open(f'{PATH_CABINET}/settings.json', 'w+') as file:
+            with open(f'{PATH_CABINET}/settings.json', 'w+', encoding="utf8") as file:
                 file.write('{}')
             print("Done. Please try your last command again.")
         else:
@@ -76,7 +82,7 @@ def main():
         sys.exit(-1)
 
     PATH_LOG = get('path', 'log')
-    if PATH_LOG == None:
+    if PATH_LOG is None:
         PATH_LOG = put(
             'path', 'log', f"{PATH_CABINET}/log", fileName='settings.json')
         print(
@@ -98,8 +104,8 @@ def edit(path, create_if_not_exist=False):
     if path in get("path", "edit"):
         item = get("path", "edit", path)
         if not isinstance(item, dict) or "value" not in item.keys():
-            log(
-                f"Could not use shortcut for {path} in getItem(path -> edit); should be a JSON object with value", level="warn")
+            log(f"Could not use shortcut for {path} \
+                in getItem(path -> edit); should be a JSON object with value", level="warn")
         else:
             path = item["value"]
 
@@ -137,7 +143,8 @@ def get(*attribute, warn=False):
             _settings = _settings[item]
         elif warn and (len(attribute) < 2 or attribute[1] != "edit"):
             print(
-                f"Warning: {item} not found in {_settings if index > 0 else f'{PATH_CABINET}/settings.json'}")
+                f"Warning: {item} not found in \
+                    {_settings if index > 0 else f'{PATH_CABINET}/settings.json'}")
             return None
         else:
             return None
@@ -151,14 +158,14 @@ def put(*attribute, value=None, fileName='settings.json'):
     The last argument is the value to set, unless value is specified.
     Returns the value set.
     """
-    
+
     path_full = f"{PATH_CABINET}/{fileName}"
 
     if not value:
         value = attribute[-1]
 
     _settings = SETTINGS if fileName == 'settings.json' else json.load(
-        open(path_full))
+        open(path_full, encoding="utf8"))
 
     # iterate through entire JSON object and replace 2nd to last attribute with value
 
@@ -175,7 +182,7 @@ def put(*attribute, value=None, fileName='settings.json'):
             else:
                 partition = partition[item]
 
-    with open(path_full, 'w+') as file:
+    with open(path_full, 'w+', encoding="utf8") as file:
         json.dump(_settings, file, indent=4)
 
     return value
@@ -199,7 +206,7 @@ def get_file_as_array(item, file_path=None, strip=True, ignore_not_found=False):
         if not file_path[-1] == '/':
             file_path += '/'
 
-        content = open(file_path + item, "r").read()
+        content = open(file_path + item, "r", encoding="utf8").read()
 
         if strip is not False:
             content = content.strip()
@@ -207,7 +214,7 @@ def get_file_as_array(item, file_path=None, strip=True, ignore_not_found=False):
         return content.split('\n')
     except Exception as error:
         if not ignore_not_found or error.__class__ != FileNotFoundError:
-            log(f"getFileAsArray: {error}", level="error")
+            log(f"get_file_as_array: {error}", level="error")
         return ""
 
 
@@ -227,7 +234,7 @@ def write_file(file_name, file_path=None, content=None, append=False, is_quiet=F
     if not os.path.exists(file_path):
         os.makedirs(file_path)
 
-    with open(file_path + "/" + file_name, 'w+' if not append else 'a+') as file:
+    with open(file_path + "/" + file_name, 'w+' if not append else 'a+', encoding="utf8") as file:
         file.write(content)
 
         if not is_quiet:
@@ -240,7 +247,7 @@ def get_config(key=None):
     """
 
     try:
-        with open(PATH_CONFIG_FILE, 'r+') as file:
+        with open(PATH_CONFIG_FILE, 'r+', encoding="utf8") as file:
             return json.load(file)[key]
     except FileNotFoundError:
         if key == 'path_cabinet':
@@ -257,10 +264,11 @@ def get_config(key=None):
         return ""
     except json.decoder.JSONDecodeError:
         response = input(
-            f"The config file ({PATH_CONFIG_FILE}) is not valid JSON. Do you want to replace it with an empty JSON file?  (you will lose existing data) (y/n)\n")
+            f"The config file ({PATH_CONFIG_FILE}) is not valid JSON. Do you want to \
+                replace it with an empty JSON file?  (you will lose existing data) (y/n)\n")
         if response.lower().startswith("y"):
-            with open(PATH_CONFIG_FILE, 'w+') as f:
-                f.write('{}')
+            with open(PATH_CONFIG_FILE, 'w+', encoding="utf8") as file:
+                file.write('{}')
             print("Done. Please try your last command again.")
         else:
             print(f"OK. Please fix {PATH_CONFIG_FILE} and try again.")
@@ -288,20 +296,21 @@ def put_config(key=None, value=None):
         if not os.path.exists(os.path.expanduser(value)):
             print(f"Warning: {value} is not a valid path.")
         if value[0] == '~':
-            print("Warning: using tilde expansions may cause problems if using cabinet for multiple users. It is recommended to use full paths.")
+            print("Warning: using tilde expansions may cause problems \
+                if using cabinet for multiple users. It is recommended to use full paths.")
 
     try:
-        with open(PATH_CONFIG_FILE, 'r+') as file:
+        with open(PATH_CONFIG_FILE, 'r+', encoding="utf8") as file:
             config = json.load(file)
     except FileNotFoundError:
-        with open(PATH_CONFIG_FILE, 'x+') as f:
-            print(f"Note: Could not find an existing config file... creating a new one.")
-            f.write('{}')
+        with open(PATH_CONFIG_FILE, 'x+', encoding="utf8") as file:
+            print("Note: Could not find an existing config file; creating a new one.")
+            file.write('{}')
             config = {}
 
     config[key] = value
 
-    with open(PATH_CONFIG_FILE, 'w+') as file:
+    with open(PATH_CONFIG_FILE, 'w+', encoding="utf8") as file:
         json.dump(config, file, indent=4)
 
     print(f"\n\nUpdated configuration file ({PATH_CONFIG_FILE}).")
@@ -320,7 +329,7 @@ def get_logger(log_name=None, level=logging.INFO, file_path=None, is_quiet=False
     if file_path is None:
         file_path = f"{PATH_LOG}{today}"
     if log_name is None:
-        log_name = f"LOG_DAILY {today}"
+        log_name = f"LOG_DAILY_{today}"
 
     # create path if necessary
     if not os.path.exists(file_path):
@@ -380,7 +389,7 @@ def log(message=None, log_name=None, level="info", file_path=None, is_quiet=Fals
     else:
         logger = get_logger(
             log_name=log_name, level=logging.ERROR, file_path=file_path, is_quiet=is_quiet)
-        logger.error(f"Unknown log level: {level}; using ERROR")
+        logger.error("Unknown log level: %s; using ERROR", level)
         logger.error(message)
 
 
@@ -392,8 +401,8 @@ if __name__ == "__main__":
 
 if "cabinet" in sys.argv[0] and len(sys.argv) > 1:
     if sys.argv[-1] == 'config':
-        put_config('path_cabinet', input(
-            f"Enter the full path of the directory where you want to store all data (currently {PATH_CABINET}):\n"))
+        put_config('path_cabinet', input(f"Enter the full path of the directory \
+            where you want to store all data (currently {PATH_CABINET}):\n"))
 
     if sys.argv[1] == 'edit':
         if len(sys.argv) > 2:

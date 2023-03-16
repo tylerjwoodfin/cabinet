@@ -133,7 +133,7 @@ mail.send('Test Subject', 'Test Body')
 
 from cabinet import cabinet
 
-# writes to a file named LOG_DAILY YYYY-MM-DD in the default log folder (or cabinet.get('path', 'log')) inside a YYYY-MM-DD folder
+# writes to a file named LOG_DAILY_YYYY-MM-DD in the default log folder (or cabinet.get('path', 'log')) inside a YYYY-MM-DD folder
 
 cabinet.log("Connection timed out") # defaults to 'info' if no level is set
 cabinet.log("This function hit a breakpoint", level="debug")
