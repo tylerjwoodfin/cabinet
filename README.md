@@ -73,9 +73,11 @@ Supports email and event logging.
 ### `set`
 
 ```
-from cabinet import cabinet
+from cabinet import Cabinet
 
-cabinet.Cabinet().set("employee", "Tyler", "salary", 7.25)
+cab = Cabinet()
+
+cab.set("employee", "Tyler", "salary", 7.25)
 ```
 
 results in this structure in settings.json:
@@ -93,9 +95,11 @@ results in this structure in settings.json:
 ### `get`
 
 ```
-from cabinet import cabinet
+from cabinet import Cabinet
 
-print(cabinet.Cabinet().get("employee", "Tyler", "salary"))
+cab = Cabinet()
+
+print(cab.get("employee", "Tyler", "salary"))
 ```
 
 ```
@@ -106,7 +110,7 @@ print(cabinet.Cabinet().get("employee", "Tyler", "salary"))
 ### `edit`
 
 ```
-from cabinet import cabinet
+from cabinet import Cabinet
 
 cab = Cabinet()
 
@@ -133,7 +137,7 @@ mail.send('Test Subject', 'Test Body')
 
 ```
 
-from cabinet import cabinet
+from cabinet import Cabinet
 
 cab = Cabinet()
 

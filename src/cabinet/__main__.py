@@ -1,6 +1,6 @@
 """
 main entrypoint
 """
-from cabinet import cabinet
+from cabinet import Cabinet
 
-cabinet.main()
+cab = Cabinet()

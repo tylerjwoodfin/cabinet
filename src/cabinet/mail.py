@@ -15,9 +15,9 @@ import pwd
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from cabinet import cabinet
+from cabinet import Cabinet
 
-cab = cabinet.Cabinet()
+cab = Cabinet()
 
 userDir = pwd.getpwuid(os.getuid())[0]
 
