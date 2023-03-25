@@ -1,6 +1,16 @@
 """
-The main module for file management
+Cabinet provides a simple interface for storing and retrieving data in a centralized location. 
+
+It includes a variety of utility methods for managing files, logging, and managing configurations.
+
+Usage:
+    ```
+    from cabinet import cabinet
+
+    cab = Cabinet()
+    ```
 """
+
 import os
 import json
 import pathlib
@@ -12,30 +22,49 @@ from typing import Optional
 
 class Cabinet:
     """
-    The main module for file management
+    The main class for Cabinet
     """
 
     path_cabinet: str = None
     path_config_file: str = None
     path_settings_file: str = None
     path_log: str = None
-    settings = None
-    is_initialized: bool = False
+    settings_json = None
 
-    def __init__(self, path_cabinet=None):
+    def __init__(self, path_cabinet: str = None):
+        """
+        The main module for file management
+
+        Args:
+            - path_cabinet (str, optional): the directory of a settings.json file to be used
+                Defaults to ~/cabinet if unset
+
+        Returns:
+            None
+
+        Usage:
+            ```
+            from cabinet import cabinet
+            cab = cabinet.Cabinet()
+            ```
+        """
+
+        # config file, stored within the package
+        self.path_config_file = pathlib.Path(
+            __file__).resolve().parent / "config.json"
+
+        # Determines where settings.json is stored; by default, this is ~/cabinet
+        self.path_cabinet = os.path.expanduser(
+            self._get_config('path_cabinet'))
+
+        path_cabinet = path_cabinet or self.path_cabinet
+
         if path_cabinet is None:
             path_cabinet = input(
                 "Enter the directory to store settings.json: ")
             if not path_cabinet:
                 path_cabinet = str(pathlib.Path.home() / "cabinet")
 
-        # Determines where settings.json is stored; by default, this is ~/cabinet
-        self.path_cabinet = os.path.expanduser(
-            self.get_config('path_cabinet'))
-
-        # config file, stored within the package
-        self.path_config_file = pathlib.Path(
-            __file__).resolve().parent / "config.json"
         self.path_settings_file = pathlib.Path(path_cabinet) / "settings.json"
 
         try:
@@ -52,10 +81,10 @@ class Cabinet:
                 file.write('{}')
 
         try:
-            self.settings = json.load(
+            self.settings_json = json.load(
                 open(f'{path_cabinet}/settings.json', encoding="utf8"))
-        except json.decoder.JSONDecodeError as error:
 
+        except json.decoder.JSONDecodeError as error:
             print(f"{error}\n")
 
             response = input(
@@ -80,6 +109,7 @@ class Cabinet:
             sys.exit(-1)
 
         path_log = self.get('path', 'log')
+
         if path_log is None:
             path_log = self.put(
                 'path', 'log', f"{path_cabinet}/log", file_name='settings.json')
@@ -91,6 +121,111 @@ class Cabinet:
             os.makedirs(path_log)
         if not path_log[-1] == '/':
             path_log += '/'
+
+        self.path_log = path_log
+
+    def _get_config(self, key=None):
+        """
+        Gets a property from the internal configuration file.
+
+        Args:
+        - key (str): The key to search for in the JSON file.
+
+        Returns:
+        - The value of the key in the JSON file.
+
+        If the JSON file does not exist or is not valid JSON, 
+            the function provides default behavior:
+        - If `key` is `path_cabinet`, the function prompts
+            the user to enter a directory to store settings.json.
+        - If `key` is not found, the function returns an empty string.
+        - If the file is not valid JSON, the function prompts
+            the user to replace the file with an empty JSON file.
+        """
+
+        try:
+            with open(self.path_config_file, 'r+', encoding="utf8") as file:
+                return json.load(file)[key]
+        except FileNotFoundError:
+            if key == 'path_cabinet':
+                # set default settings.json and log path to ~/cabinet
+                path_cabinet_msg = """Enter the directory to store settings.json.\n"""\
+                    f"""This should be a public place, """\
+                    f"""such as {pathlib.Path.home().resolve()}/cabinet.\n\n"""
+
+                path_cabinet = input(path_cabinet_msg)
+
+                self._put_config(key, path_cabinet)
+                return path_cabinet
+        except KeyError:
+            print(f"Warning: Key error for key: {key}")
+            return ""
+        except json.decoder.JSONDecodeError:
+            response = input(
+                f"The config file ({self.path_config_file}) is not valid JSON. Do you want to \
+                    replace it with an empty JSON file?  (you will lose existing data) (y/n)\n")
+            if response.lower().startswith("y"):
+                with open(self.path_config_file, 'w+', encoding="utf8") as file:
+                    file.write('{}')
+                print("Done. Please try your last command again.")
+            else:
+                print(f"OK. Please fix {self.path_config_file} and try again.")
+
+            sys.exit(-1)
+
+    def _put_config(self, key: str = None, value: str = None):
+        """
+        Updates the internal configuration file with a new key-value pair.
+
+        Args:
+            key (str): The key for the configuration setting.
+            value (str): The value for the configuration setting.
+
+        Returns:
+            str: The updated value for the configuration setting.
+
+        Raises:
+            FileNotFoundError: If the configuration file cannot be found.
+        """
+
+        if value == "":
+            print("No changes were made.")
+            sys.exit(1)
+        else:
+
+            # error correction
+            if key == 'path_cabinet' and value[0] != '/' and value[0] != '~':
+                value = f"/{value}"
+            if key == 'path_cabinet' and value[-1] == '/':
+                value = f"{value[:-1]}"
+
+            # warn about potential problems
+            if not os.path.exists(os.path.expanduser(value)):
+                print(f"Warning: {value} is not a valid path.")
+            if value[0] == '~':
+                print("""
+Warning: using tilde expansions may cause problems
+if using cabinet for multiple users. It is recommended to use full paths.""")
+
+        try:
+            with open(self.path_config_file, 'r+', encoding="utf8") as file:
+                config = json.load(file)
+        except FileNotFoundError:
+            with open(self.path_config_file, 'x+', encoding="utf8") as file:
+                print(
+                    "Note: Could not find an existing config file; creating a new one.")
+                file.write('{}')
+                config = {}
+
+        config[key] = value
+
+        with open(self.path_config_file, 'w+', encoding="utf8") as file:
+            json.dump(config, file, indent=4)
+
+        print(f"\n\nUpdated configuration file ({self.path_config_file}).")
+        print(f"{key} is now {value}\n")
+
+        return value
 
     def _get_logger(self, log_name: str = None, level: int = logging.INFO,
                     file_path: str = None, is_quiet: bool = False) -> logging.Logger:
@@ -145,24 +280,48 @@ class Cabinet:
         logger.addHandler(file_handler)
         return logger
 
-    def edit_file(self, file_path: str, create_if_not_exist: bool = False) -> None:
+    def configure(self):
+        """
+        Configures the Cabinet instance based on command line arguments or user input.
+        """
+
+        message = f"""
+Enter the full path of the directory where you want to store 
+all data (currently {self.path_cabinet}):\n"""
+
+        self._put_config('path_cabinet', input(message))
+
+    def edit_file(self, file_path: str = None, create_if_not_exist: bool = True) -> None:
         """
         Edit and save a file using Vim.
 
         Args:
-            file_path (str): The path to the file to edit. 
+            - file_path (str, optional): The path to the file to edit. 
                 Allows for shortcuts by setting paths in settings.json -> path -> edit
+                If unset, edit settings.json
 
-            create_if_not_exist (bool, optional): Whether to create the file if it does not exist.
+            - create_if_not_exist (bool, optional): Whether to create the file if it does not exist.
                 Defaults to False.
 
         Raises:
-            ValueError: If the file_path is not a string.
-            FileNotFoundError: If the file does not exist and create_if_not_exist is False.
+            - ValueError: If the file_path is not a string.
+
+            - FileNotFoundError: If the file does not exist and create_if_not_exist is True.
 
         Returns:
             None
         """
+
+        # edit settings.json if no file_path
+        if file_path is None:
+            message = f"""
+Enter the path of the file you want to edit
+(default: {self.path_cabinet}/settings.json):\n"""
+
+            path = self.path_settings_file or input(
+                message) or f"{self.path_cabinet}/settings.json"
+            self.edit_file(path)
+            return
 
         # allows for shortcuts by setting paths in settings.json -> path -> edit
         if file_path in self.get("path", "edit"):
@@ -198,20 +357,20 @@ class Cabinet:
         Returns a property in a JSON file based on the input attributes.
 
         Args:
-            attributes (str): the attributes to traverse in the JSON file
-            warn_missing (bool, optional): whether to warn if an attribute is missing
+            - attributes (str): the attributes to traverse in the JSON file
+            - warn_missing (bool, optional): whether to warn if an attribute is missing
 
         Returns:
-            The value of the attribute if it exists in the JSON file, otherwise default.
+            - The value of the attribute if it exists in the JSON file, otherwise default.
 
         Usage:
-            get('person', 'tyler', 'salary') returns person -> tyler -> salary from self.settings
+            - get('person', 'tyler', 'salary') returns person -> tyler -> salary from self.settings
         """
 
-        if self.settings is None:
+        if self.settings_json is None:
             return None
 
-        settings = self.settings
+        settings = self.settings_json
 
         for index, item in enumerate(attributes):
             if item in settings:
@@ -246,7 +405,7 @@ class Cabinet:
         if not value:
             value = attribute[-1]
 
-        _settings = self.settings if file_name == 'settings.json' else json.load(
+        _settings = self.settings_json if file_name == 'settings.json' else json.load(
             open(path_full, encoding="utf8"))
 
         # iterate through entire JSON object and replace 2nd to last attribute with value
@@ -270,24 +429,28 @@ class Cabinet:
         return value
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
-                          ignore_not_found: bool = False):
+                          ignore_not_found: bool = False) -> list[str]:
         """
         Reads a file and returns its contents as a list of lines.
         The file is assumed to be encoded in UTF-8.
 
-        :param item: The filename to read.
-        :param file_path: The path to the directory containing the file.
-                        If None, the default path is used.
-        :param strip: Whether to strip the lines of whitespace characters (on by default).
-        :param ignore_not_found: Whether to return None when the file is not found.
+        Args:
+            - item (str): The filename to read.
+            - file_path (str, optional): The path to the directory containing the file.
+                If None, the default path is used.
+            - strip (bool, optional): Whether to strip the lines of whitespace characters
+                On by default.
+            - ignore_not_found (bool, optional): Whether to return None when the file is not found.
+                False by default.
 
-        :return: A list of lines, or None if the file is not found and ignore_not_found is True.
+        Returns:
+            A list of lines, or None if the file is not found and ignore_not_found is True.
         """
 
         if file_path is None:
             file_path = self.path_log
         elif file_path == "notes":
-            file_path = self.get('path', 'notes', 'local')
+            file_path = self.get('path', 'notes')
 
         if not file_path[-1] == '/':
             file_path += '/'
@@ -310,21 +473,27 @@ class Cabinet:
         """
         Writes a file to the specified path and creates subfolders if necessary.
 
-        :param file_name: The name of the file to write.
-        :param file_path: The path to the directory where the file should be written.
-                        If None, the default path is used.
-        :param content: The contents to write to the file.
-        :param append: Whether to append to the file instead of overwriting it.
-        :param is_quiet: Whether to print a message indicating that the file was written.
+        Args:
+            - file_name (str): The name of the file to write.
+            - file_path (str, optional): The path to the directory where the file should be written.
+                If None, path_log is used.
+            - content (str, optional): The contents to write to the file.
+                If None, an empty file is created.
+            - append (bool, optional): Whether to append to the file instead of overwriting it.
+                Default: False
+            - is_quiet (bool, optional): Whether to skip printing status messages.
+                Default: False
 
-        :return: True if the file was written successfully, False otherwise.
+        Return:
+            True if the file was written successfully
+            False otherwise.
         """
 
         try:
             if file_path is None:
                 file_path = self.path_log.rstrip("/")
             elif file_path == "notes":
-                file_path = self.get('path', 'notes', 'local')
+                file_path = self.get('path', 'notes')
             os.makedirs(file_path, exist_ok=True)
             with open(f"{file_path}/{file_name}", 'a+' if append else 'w', encoding="utf8") as file:
                 file.write(content or "")
@@ -334,98 +503,6 @@ class Cabinet:
         except (OSError, IOError) as error:
             self.log(f"write_file: {error}", level="error")
             return False
-
-    def get_config(self, key=None):
-        """
-        Gets a property from the internal configuration file.
-
-        Args:
-        - key (str): The key to search for in the JSON file.
-
-        Returns:
-        - The value of the key in the JSON file.
-
-        If the JSON file does not exist or is not valid JSON, 
-            the function provides default behavior:
-        - If `key` is `path_cabinet`, the function prompts
-            the user to enter a directory to store settings.json.
-        - If `key` is not found, the function returns an empty string.
-        - If the file is not valid JSON, the function prompts
-            the user to replace the file with an empty JSON file.
-        """
-
-        try:
-            with open(self.path_config_file, 'r+', encoding="utf8") as file:
-                return json.load(file)[key]
-        except FileNotFoundError:
-            if key == 'path_cabinet':
-                # set default settings.json and log path to ~/cabinet
-                path_cabinet_msg = """Enter the directory to store settings.json.\n"""\
-                    f"""This should be a public place, """\
-                    f"""such as {pathlib.Path.home().resolve()}/cabinet.\n\n"""
-
-                path_cabinet = input(path_cabinet_msg)
-
-                self.put_config(key, path_cabinet)
-                return path_cabinet
-        except KeyError:
-            print(f"Warning: Key error for key: {key}")
-            return ""
-        except json.decoder.JSONDecodeError:
-            response = input(
-                f"The config file ({self.path_config_file}) is not valid JSON. Do you want to \
-                    replace it with an empty JSON file?  (you will lose existing data) (y/n)\n")
-            if response.lower().startswith("y"):
-                with open(self.path_config_file, 'w+', encoding="utf8") as file:
-                    file.write('{}')
-                print("Done. Please try your last command again.")
-            else:
-                print(f"OK. Please fix {self.path_config_file} and try again.")
-
-            sys.exit(-1)
-
-    def put_config(self, key=None, value=None):
-        """
-        Updates the internal configuration file
-        """
-
-        if value == "":
-            print("No changes were made.")
-            sys.exit(1)
-        else:
-
-            # error correction
-            if key == 'path_cabinet' and value[0] != '/' and value[0] != '~':
-                value = f"/{value}"
-            if key == 'path_cabinet' and value[-1] == '/':
-                value = f"{value[:-1]}"
-
-            # warn about potential problems
-            if not os.path.exists(os.path.expanduser(value)):
-                print(f"Warning: {value} is not a valid path.")
-            if value[0] == '~':
-                print("Warning: using tilde expansions may cause problems \
-                    if using cabinet for multiple users. It is recommended to use full paths.")
-
-        try:
-            with open(self.path_config_file, 'r+', encoding="utf8") as file:
-                config = json.load(file)
-        except FileNotFoundError:
-            with open(self.path_config_file, 'x+', encoding="utf8") as file:
-                print(
-                    "Note: Could not find an existing config file; creating a new one.")
-                file.write('{}')
-                config = {}
-
-        config[key] = value
-
-        with open(self.path_config_file, 'w+', encoding="utf8") as file:
-            json.dump(config, file, indent=4)
-
-        print(f"\n\nUpdated configuration file ({self.path_config_file}).")
-        print(f"{key} is now {value}\n")
-
-        return value
 
     def log(self, message: str = '', log_name: str = None, level: str = 'info',
             file_path: str = None, is_quiet: bool = False) -> None:
@@ -440,7 +517,7 @@ class Cabinet:
                 Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
                 Defaults to 'info'.
             file_path (str, optional): The path to the log file. 
-                If not provided, logging will be sent to the console.
+                If not provided, logs will be saved to settings.json -> path -> log.
                 Defaults to None.
             is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
 
@@ -451,40 +528,49 @@ class Cabinet:
             None
         """
 
-        # Validate log level
+        # validate log level
         valid_levels = {'debug', 'info', 'warn',
                         'warning', 'error', 'critical'}
         if level.lower() not in valid_levels:
             raise ValueError(
                 f"Invalid log level: {level}. Must be one of {', '.join(valid_levels)}.")
 
-        # Get logger instance
+        # get logger instance
         logger = self._get_logger(log_name=log_name, level=level.upper(),
-                             file_path=file_path, is_quiet=is_quiet)
+                                  file_path=file_path, is_quiet=is_quiet)
 
         # Log message
         if not is_quiet:
             getattr(logger, level.lower())(message)
 
-        if "cabinet" in sys.argv[0] and len(sys.argv) > 1:
-            if sys.argv[-1] == 'config':
-                self.put_config('path_cabinet', input(
-                    f"""
-                    Enter the full path of the directory where you 
-                    want to store all data (currently {self.path_cabinet}):\n
-                    """))
-            if sys.argv[1] == 'edit':
-                if len(sys.argv) > 2:
-                    self.edit_file(sys.argv[2])
-                else:
-                    path = input(
-                        f"""
-                        Enter the path of the file you want to edit 
-                        (default: {self.path_cabinet}/settings.json):\n
-                        """)
-                    path = path or f"{self.path_cabinet}/settings.json"
-                    self.edit_file(path)
+
+def main():
+    """
+    Main function for running Cabinet.
+
+    Args:
+        None
+
+    Returns:
+        None
+
+    Usage:
+        (from the terminal)
+        cabinet config
+        cabinet edit <file path/name, optional; default: settings.json>
+    """
+
+    if len(sys.argv) < 2:
+        print("Cabinet is not intended to be directly run. See README.md.")
+        sys.exit(0)
+
+    if "cabinet" in sys.argv[0] and len(sys.argv) > 1:
+        if "config" == sys.argv[1]:
+            Cabinet().configure()
+        elif "edit" == sys.argv[1]:
+            path = None if len(sys.argv) < 3 else sys.argv[2]
+            Cabinet().edit_file(path)
 
 
 if __name__ == "__main__":
-    print("Cabinet is a library not intended to be directly run. See README.md.")
+    main()
