@@ -429,7 +429,7 @@ Enter the path of the file you want to edit
         return value
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
-                          ignore_not_found: bool = False) -> list[str]:
+                          ignore_not_found: bool = False):
         """
         Reads a file and returns its contents as a list of lines.
         The file is assumed to be encoded in UTF-8.
