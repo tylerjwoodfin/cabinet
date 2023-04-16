@@ -16,8 +16,10 @@ import json
 import pathlib
 import logging
 import sys
+import argparse
 from datetime import date
 from typing import Optional
+import importlib.metadata
 
 
 class Cabinet:
@@ -280,6 +282,13 @@ if using cabinet for multiple users. It is recommended to use full paths.""")
         logger.addHandler(file_handler)
         return logger
 
+    def _ifprint(self, message: str, is_print: bool):
+        """
+        Prints a string if `print` is true.
+        """
+        if is_print:
+            print(message)
+
     def configure(self):
         """
         Configures the Cabinet instance based on command line arguments or user input.
@@ -291,9 +300,15 @@ all data (currently {self.path_cabinet}):\n"""
 
         self._put_config('path_cabinet', input(message))
 
+    def edit(self):
+        """
+        Edits and saves the settings file.
+        """
+        self.edit_file(self.path_settings_file)
+
     def edit_file(self, file_path: str = None, create_if_not_exist: bool = True) -> None:
         """
-        Edit and save a file using Vim.
+        Edit and save a file in Vim.
 
         Args:
             - file_path (str, optional): The path to the file to edit. 
@@ -352,7 +367,7 @@ Enter the path of the file you want to edit
         if original_contents == new_contents:
             print("No changes.")
 
-    def get(self, *attributes, warn_missing=False):
+    def get(self, *attributes, warn_missing=False, is_print=False):
         """
         Returns a property in a JSON file based on the input attributes.
 
@@ -368,6 +383,7 @@ Enter the path of the file you want to edit
         """
 
         if self.settings_json is None:
+            self._ifprint("None", is_print)
             return None
 
         settings = self.settings_json
@@ -376,16 +392,19 @@ Enter the path of the file you want to edit
             if item in settings:
                 settings = settings[item]
             elif warn_missing and (len(attributes) < 2 or attributes[1] != "edit"):
-                print(
+                is_print(
                     f"Warning: {item} not found in \
                         {settings if index > 0 else f'{self.path_cabinet}/settings.json'}")
+                self._ifprint("None", is_print)
                 return None
             else:
+                self._ifprint("None", is_print)
                 return None
 
+        self._ifprint(settings, is_print)
         return settings
 
-    def put(self, *attribute, value=None, file_name='settings.json'):
+    def put(self, *attribute, value=None, file_name='settings.json', is_print=False):
         """
         Adds or replaces a property in a JSON file (default name: settings.json).
 
@@ -411,12 +430,17 @@ Enter the path of the file you want to edit
         # iterate through entire JSON object and replace 2nd to last attribute with value
 
         partition = _settings
+
         for index, item in enumerate(attribute[:-1]):
             if item not in partition:
-                partition[item] = value if index == len(attribute) - 2 else {}
-                partition = partition[item]
-                print(
-                    f"Warning: Adding new key '{item}' to {partition if index > 0 else path_full}")
+                try:
+                    partition[item] = value if index == len(attribute) - 2 else {}
+                    partition = partition[item]
+                    self.log(f"Adding new key '{item}' to {partition if index > 0 else path_full}",
+                             level="warn")
+                except TypeError as error:
+                    self.log(f"{error}\n\n{attribute[index-1]} is currently a string, so it cannot \
+be treated as an object with multiple properties.", level="error")
             else:
                 if index == len(attribute) - 2:
                     partition[item] = value
@@ -426,6 +450,7 @@ Enter the path of the file you want to edit
         with open(path_full, 'w+', encoding="utf8") as file:
             json.dump(_settings, file, indent=4)
 
+        self._ifprint(f"{' -> '.join(attribute[:-1])} set to {value}", is_print)
         return value
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
@@ -504,7 +529,7 @@ Enter the path of the file you want to edit
             self.log(f"write_file: {error}", level="error")
             return False
 
-    def log(self, message: str = '', log_name: str = None, level: str = 'info',
+    def log(self, message: str = '', log_name: str = None, level: str = None,
             file_path: str = None, is_quiet: bool = False) -> None:
         """
         Logs a message using the specified log level
@@ -527,6 +552,9 @@ Enter the path of the file you want to edit
         Returns:
             None
         """
+
+        if level is None:
+            level = 'info'
 
         # validate log level
         valid_levels = {'debug', 'info', 'warn',
@@ -560,16 +588,56 @@ def main():
         cabinet edit <file path/name, optional; default: settings.json>
     """
 
-    if len(sys.argv) < 2:
-        print("Cabinet is not intended to be directly run. See README.md.")
-        sys.exit(0)
 
-    if "cabinet" in sys.argv[0] and len(sys.argv) > 1:
-        if "config" == sys.argv[1]:
-            Cabinet().configure()
-        elif "edit" == sys.argv[1]:
-            path = None if len(sys.argv) < 3 else sys.argv[2]
-            Cabinet().edit_file(path)
+    cab = Cabinet()
+    package_name = sys.modules[__name__].__package__.split('.')[0]
+    version = importlib.metadata.version(package_name)
+
+    parser = argparse.ArgumentParser(
+        description=f"Cabinet ({version})")
+
+    parser.add_argument('--configure', '-config', dest='configure',
+                        action='store_true', help='Configure')
+    parser.add_argument('--edit', '-e', dest='edit', action='store_true',
+                        help='Edit the settings.json file')
+    parser.add_argument('--edit-file', '-ef', type=str, dest='edit_file',
+                        help='Edit a specific file')
+    parser.add_argument('--no-create', dest='create',
+                        action='store_false',
+                        help='(for -ef) Do not create file if it does not exist')
+    parser.add_argument('--get', '-g', dest='get', nargs='+',
+                        help='Get a property from settings.json')
+    parser.add_argument('--put', '-p', dest='put', nargs='+',
+                        help='Put a property into settings.json')
+    parser.add_argument('--get-file', dest='get_file',
+                        type=str, help='Get file')
+    parser.add_argument('--strip', dest='strip', action='store_false',
+                        help='(for --get-file) Whether to strip file content whitespace')
+    parser.add_argument('--log','-l', type=str,
+                        dest='log', help='Log a message to the default location')
+    parser.add_argument('--level', type=str, dest='log_level',
+                        help='(for -l) Log level [debug, info, warn, error, critical]')
+    parser.add_argument('-v', '--version',
+                        action='version', help='Show version number and exit', version=version)
+
+    args = parser.parse_args()
+
+    if args.configure:
+        cab.configure()
+    elif args.edit:
+        cab.edit()
+    elif args.edit_file:
+        cab.edit_file(file_path=args.edit_file, create_if_not_exist=args.create)
+    elif args.get:
+        cab.get(is_print=True, *args.get)
+    elif args.put:
+        attribute_values = args.put
+        cab.put(*attribute_values, is_print=True)
+    elif args.get_file:
+        cab.get_file_as_array(item=args.get_file,
+                              file_path=None, strip=args.strip)
+    elif args.log:
+        cab.log(message=args.log, level=args.log_level)
 
 
 if __name__ == "__main__":
