@@ -40,6 +40,13 @@ Options:
   --log, -l               Log a message to the default location
   --level LOG_LEVEL       (for -l) Log level [debug, info, warn, error, critical]
   -v, --version           show version number and exit
+
+Mail:
+  --mail                Sends an email
+  --subject SUBJECT, -s SUBJECT
+                        Email subject
+  --body BODY, -b BODY  Email body
+  --to TO_ADDR, -t TO_ADDR
 ```
 
 ## Configuration
@@ -185,12 +192,24 @@ cabinet -ef "/path/to/shopping.md"
 
 ### `mail`
 
+python:
 ```
 
-from cabinet import mail
+from cabinet import Mail
+
+mail = Mail()
 
 mail.send('Test Subject', 'Test Body')
 
+```
+
+terminal:
+```
+cabinet --mail --subject "Test Subject" --body "Test Body"
+
+# or
+
+cabinet --mail -s "Test Subject" -b "Test Body"
 ```
 
 ### `log`

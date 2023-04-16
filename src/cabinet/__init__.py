@@ -1,5 +1,5 @@
 """
-Cabinet provides a simple interface for storing and retrieving data in a centralized location. 
+Cabinet provides a simple interface for storing and retrieving data in a centralized location.
 
 It includes a variety of utility methods for managing files, logging, and managing configurations.
 
@@ -20,6 +20,7 @@ import argparse
 from datetime import date
 from typing import Optional
 import importlib.metadata
+from .mail import Mail
 
 
 class Cabinet:
@@ -136,7 +137,7 @@ class Cabinet:
         Returns:
         - The value of the key in the JSON file.
 
-        If the JSON file does not exist or is not valid JSON, 
+        If the JSON file does not exist or is not valid JSON,
             the function provides default behavior:
         - If `key` is `path_cabinet`, the function prompts
             the user to enter a directory to store settings.json.
@@ -295,7 +296,7 @@ if using cabinet for multiple users. It is recommended to use full paths.""")
         """
 
         message = f"""
-Enter the full path of the directory where you want to store 
+Enter the full path of the directory where you want to store
 all data (currently {self.path_cabinet}):\n"""
 
         self._put_config('path_cabinet', input(message))
@@ -311,7 +312,7 @@ all data (currently {self.path_cabinet}):\n"""
         Edit and save a file in Vim.
 
         Args:
-            - file_path (str, optional): The path to the file to edit. 
+            - file_path (str, optional): The path to the file to edit.
                 Allows for shortcuts by setting paths in settings.json -> path -> edit
                 If unset, edit settings.json
 
@@ -434,7 +435,8 @@ Enter the path of the file you want to edit
         for index, item in enumerate(attribute[:-1]):
             if item not in partition:
                 try:
-                    partition[item] = value if index == len(attribute) - 2 else {}
+                    partition[item] = value if index == len(
+                        attribute) - 2 else {}
                     partition = partition[item]
                     self.log(f"Adding new key '{item}' to {partition if index > 0 else path_full}",
                              level="warn")
@@ -450,7 +452,8 @@ be treated as an object with multiple properties.", level="error")
         with open(path_full, 'w+', encoding="utf8") as file:
             json.dump(_settings, file, indent=4)
 
-        self._ifprint(f"{' -> '.join(attribute[:-1])} set to {value}", is_print)
+        self._ifprint(
+            f"{' -> '.join(attribute[:-1])} set to {value}", is_print)
         return value
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
@@ -538,10 +541,10 @@ be treated as an object with multiple properties.", level="error")
         Args:
             message (str, optional): The message to log. Defaults to ''.
             log_name (str, optional): The name of the logger to use. Defaults to None.
-            level (str, optional): The log level to use. 
+            level (str, optional): The log level to use.
                 Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
                 Defaults to 'info'.
-            file_path (str, optional): The path to the log file. 
+            file_path (str, optional): The path to the log file.
                 If not provided, logs will be saved to settings.json -> path -> log.
                 Defaults to None.
             is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
@@ -588,7 +591,6 @@ def main():
         cabinet edit <file path/name, optional; default: settings.json>
     """
 
-
     cab = Cabinet()
     package_name = sys.modules[__name__].__package__.split('.')[0]
     version = importlib.metadata.version(package_name)
@@ -613,10 +615,21 @@ def main():
                         type=str, help='Get file')
     parser.add_argument('--strip', dest='strip', action='store_false',
                         help='(for --get-file) Whether to strip file content whitespace')
-    parser.add_argument('--log','-l', type=str,
+    parser.add_argument('--log', '-l', type=str,
                         dest='log', help='Log a message to the default location')
     parser.add_argument('--level', type=str, dest='log_level',
                         help='(for -l) Log level [debug, info, warn, error, critical]')
+
+    mail_group = parser.add_argument_group('Mail')
+    mail_group.add_argument(
+        '--mail', dest='mail', action='store_true', help='Sends an email')
+    mail_group.add_argument(
+        '--subject', '-s', dest='subject', required='--mail' in sys.argv, help='Email subject')
+    mail_group.add_argument(
+        '--body', '-b', dest='body', required='--mail' in sys.argv, help='Email body')
+    mail_group.add_argument('--to', '-t', dest='to_addr',
+                            help='The "to" email address')
+
     parser.add_argument('-v', '--version',
                         action='version', help='Show version number and exit', version=version)
 
@@ -627,7 +640,8 @@ def main():
     elif args.edit:
         cab.edit()
     elif args.edit_file:
-        cab.edit_file(file_path=args.edit_file, create_if_not_exist=args.create)
+        cab.edit_file(file_path=args.edit_file,
+                      create_if_not_exist=args.create)
     elif args.get:
         cab.get(is_print=True, *args.get)
     elif args.put:
@@ -638,6 +652,11 @@ def main():
                               file_path=None, strip=args.strip)
     elif args.log:
         cab.log(message=args.log, level=args.log_level)
+    elif args.mail:
+        to_addr = None
+        if args.to_addr:
+            to_addr = ''.join(args.to_addr).split(',')
+        Mail().send(args.subject, args.body, to_addr=to_addr)
 
 
 if __name__ == "__main__":
