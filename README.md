@@ -195,7 +195,9 @@ cabinet -ef "/path/to/shopping.md"
 python:
 ```
 
-from cabinet import mail
+from cabinet import Mail
+
+mail = Mail()
 
 mail.send('Test Subject', 'Test Body')
 
