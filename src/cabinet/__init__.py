@@ -33,6 +33,16 @@ class Cabinet:
     path_settings_file: str = None
     path_log: str = None
     settings_json = None
+    new_setup: bool = False
+
+    NEW_SETUP_MSG = (
+        "Welcome to Cabinet!\n\n"
+        "Enter the directory to store the default settings.json.\n"
+        "This should be an absolute path in a public place, like "
+        f"{pathlib.Path.home().resolve()}/cabinet.\n\n"
+        "Don't worry, this won't overwrite anything in this folder.\n"
+        "By continuing, a new configuration file will be created in your site-packages folder.\n\n"
+    )
 
     def __init__(self, path_cabinet: str = None):
         """
@@ -56,15 +66,16 @@ class Cabinet:
         self.path_config_file = pathlib.Path(
             __file__).resolve().parent / "config.json"
 
-        # Determines where settings.json is stored; by default, this is ~/cabinet
+        # determines where settings.json is stored; by default, this is ~/cabinet
         self.path_cabinet = os.path.expanduser(
             self._get_config('path_cabinet'))
 
         path_cabinet = path_cabinet or self.path_cabinet
 
+        # new setup
         if path_cabinet is None:
-            path_cabinet = input(
-                "Enter the directory to store settings.json: ")
+            self.new_setup = True
+            path_cabinet = input(self.NEW_SETUP_MSG)
             if not path_cabinet:
                 path_cabinet = str(pathlib.Path.home() / "cabinet")
 
@@ -73,14 +84,17 @@ class Cabinet:
         try:
             with open(f'{path_cabinet}/settings.json', 'r+', encoding="utf8") as file:
                 file.seek(0, os.SEEK_END)
-        except FileNotFoundError as error:
+        except FileNotFoundError:
             # initialize settings file if it doesn't exist
             if not os.path.exists(path_cabinet):
                 os.makedirs(path_cabinet)
             with open(f'{path_cabinet}/settings.json', 'x+', encoding="utf8") as file:
-                print(f"\n\nWarning: settings.json not found; \
-                    created a blank one in {path_cabinet} ({error})")
-                print("You can change this location by calling 'cabinet config'.\n\n")
+                new_file_msg = ("\n\nWarning: settings.json not found; "
+                                f"created a blank one in {path_cabinet}")
+                self._ifprint(new_file_msg,
+                              self.new_setup is False)
+                self._ifprint("You can change this location by calling 'cabinet config'.\n\n",
+                              self.new_setup is False)
                 file.write('{}')
 
         try:
@@ -90,10 +104,10 @@ class Cabinet:
         except json.decoder.JSONDecodeError as error:
             print(f"{error}\n")
 
-            response = input(
-                f"The settings file ({path_cabinet}/settings.json) is not valid JSON. \
-                    Do you want to replace it with an empty JSON file? \
-                        (The existing file will be backed up in {path_cabinet}) (y/n)\n")
+            response = input(f"The settings file ({path_cabinet}/settings.json) is not valid JSON. "
+                             "Do you want to replace it with an empty JSON file? "
+                             f"(The existing file will be backed up in {path_cabinet}) (y/n)\n")
+
             if response.lower().startswith("y"):
                 print("Backing up...")
 
@@ -116,16 +130,18 @@ class Cabinet:
         if path_log is None:
             path_log = self.put(
                 'path', 'log', f"{path_cabinet}/log", file_name='settings.json')
-            print(f"""
-                \n\nCalling cabinet.log in Python will now write to {path_cabinet}/log by default.
-                """)
-            print(f"You can change this in {path_cabinet}/settings.json.\n\n")
+            print(
+                f"\nCalling cabinet.log in Python (or 'cabinet --log' in the terminal) "
+                f"will write to {path_cabinet}/log by default.\n"
+                f"You can change this in {path_cabinet}/settings.json.\n\n"
+            )
         if not os.path.exists(path_log):
             os.makedirs(path_log)
         if not path_log[-1] == '/':
             path_log += '/'
 
         self.path_log = path_log
+        self.new_setup = False
 
     def _get_config(self, key=None):
         """
@@ -151,12 +167,9 @@ class Cabinet:
                 return json.load(file)[key]
         except FileNotFoundError:
             if key == 'path_cabinet':
-                # set default settings.json and log path to ~/cabinet
-                path_cabinet_msg = """Enter the directory to store settings.json.\n"""\
-                    f"""This should be a public place, """\
-                    f"""such as {pathlib.Path.home().resolve()}/cabinet.\n\n"""
-
-                path_cabinet = input(path_cabinet_msg)
+                # setup
+                self.new_setup = True
+                path_cabinet = input(self.NEW_SETUP_MSG)
 
                 self._put_config(key, path_cabinet)
                 return path_cabinet
@@ -165,8 +178,9 @@ class Cabinet:
             return ""
         except json.decoder.JSONDecodeError:
             response = input(
-                f"The config file ({self.path_config_file}) is not valid JSON. Do you want to \
-                    replace it with an empty JSON file?  (you will lose existing data) (y/n)\n")
+                f"The config file ({self.path_config_file}) is not valid JSON.\n"
+                "Do you want to replace it with an empty JSON file? "
+                "(you will lose existing data) (y/n)\n")
             if response.lower().startswith("y"):
                 with open(self.path_config_file, 'w+', encoding="utf8") as file:
                     file.write('{}')
@@ -204,19 +218,27 @@ class Cabinet:
 
             # warn about potential problems
             if not os.path.exists(os.path.expanduser(value)):
-                print(f"Warning: {value} is not a valid path.")
+                print(f"Warning: {value} doesn't exist.")
+                create_dir = input(
+                    "Do you want to create the directory? (y/n): ")
+                if create_dir.lower().startswith("y"):
+                    os.makedirs(os.path.expanduser(value))
+                    print("Done.")
+                else:
+                    print("OK, but if you run into problems, "
+                          "run 'cabinet --config' to change to an existing directory.")
             if value[0] == '~':
-                print("""
-Warning: using tilde expansions may cause problems
-if using cabinet for multiple users. It is recommended to use full paths.""")
+                print("Warning: using tilde expansions may cause problems ",
+                      "if using cabinet for multiple users. It is recommended to use full paths.""")
 
         try:
             with open(self.path_config_file, 'r+', encoding="utf8") as file:
                 config = json.load(file)
         except FileNotFoundError:
             with open(self.path_config_file, 'x+', encoding="utf8") as file:
-                print(
-                    "Note: Could not find an existing config file; creating a new one.")
+                self._ifprint(
+                    "Note: Could not find an existing config file; creating a new one.",
+                    self.new_setup is False)
                 file.write('{}')
                 config = {}
 
@@ -226,7 +248,7 @@ if using cabinet for multiple users. It is recommended to use full paths.""")
             json.dump(config, file, indent=4)
 
         print(f"\n\nUpdated configuration file ({self.path_config_file}).")
-        print(f"{key} is now {value}\n")
+        self._ifprint(f"{key} is now {value}\n", self.new_setup is False)
 
         return value
 
@@ -252,13 +274,13 @@ if using cabinet for multiple users. It is recommended to use full paths.""")
         today = str(date.today())
 
         if file_path is None:
-            file_path = f"{self.path_log}{today}"
+            file_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
         if log_name is None:
             log_name = f"LOG_DAILY_{today}"
 
         # create path if necessary
         if not os.path.exists(file_path):
-            print(f"Creating {file_path}")
+            self._ifprint(f"Creating {file_path}", self.new_setup is True)
             os.makedirs(file_path)
 
         logger = logging.getLogger(log_name)
@@ -330,9 +352,10 @@ all data (currently {self.path_cabinet}):\n"""
 
         # edit settings.json if no file_path
         if file_path is None:
-            message = f"""
-Enter the path of the file you want to edit
-(default: {self.path_cabinet}/settings.json):\n"""
+            message = (
+                "Enter the path of the file you want to edit "
+                f"(default: {self.path_cabinet}/settings.json):\n"
+            )
 
             path = self.path_settings_file or input(
                 message) or f"{self.path_cabinet}/settings.json"
@@ -438,8 +461,9 @@ Enter the path of the file you want to edit
                     partition[item] = value if index == len(
                         attribute) - 2 else {}
                     partition = partition[item]
-                    self.log(f"Adding new key '{item}' to {partition if index > 0 else path_full}",
-                             level="warn")
+                    self.log(
+                        f"Adding new key '{item}' to {partition if index > 0 else path_full}",
+                        is_quiet=self.new_setup)
                 except TypeError as error:
                     self.log(f"{error}\n\n{attribute[index-1]} is currently a string, so it cannot \
 be treated as an object with multiple properties.", level="error")
