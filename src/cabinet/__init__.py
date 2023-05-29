@@ -50,7 +50,7 @@ class Cabinet:
 
         Args:
             - path_cabinet (str, optional): the directory of a settings.json file to be used
-                Defaults to ~/cabinet if unset
+                Defaults to get_config('path_cabinet') or ~/cabinet if unset
 
         Returns:
             None
@@ -63,14 +63,14 @@ class Cabinet:
         """
 
         # config file, stored within the package
-        self.path_config_file = pathlib.Path(
-            __file__).resolve().parent / "config.json"
+        self.path_config_file = str(pathlib.Path(
+            __file__).resolve().parent / "config.json")
 
         # determines where settings.json is stored; by default, this is ~/cabinet
-        self.path_cabinet = os.path.expanduser(
+        self.path_cabinet = path_cabinet or os.path.expanduser(
             self._get_config('path_cabinet'))
 
-        path_cabinet = path_cabinet or self.path_cabinet
+        path_cabinet = self.path_cabinet
 
         # new setup
         if path_cabinet is None:
@@ -416,9 +416,10 @@ all data (currently {self.path_cabinet}):\n"""
             if item in settings:
                 settings = settings[item]
             elif warn_missing and (len(attributes) < 2 or attributes[1] != "edit"):
-                is_print(
-                    f"Warning: {item} not found in \
-                        {settings if index > 0 else f'{self.path_cabinet}/settings.json'}")
+                msg_settings = settings if index > 0 else f'{self.path_cabinet}/settings.json'
+                self._ifprint(
+                    f"Warning: {item} not found in {msg_settings}",
+                    is_print)
                 self._ifprint("None", is_print)
                 return None
             else:
@@ -438,6 +439,8 @@ all data (currently {self.path_cabinet}):\n"""
             value (optional): The value to put into the property.
                 If not specified, the last argument will be used.
             file_name (str): The name of the JSON file to put the property in.
+                File must be in the `path_cabinet` folder.
+                Default: 'settings.json'
 
         Returns:
             The value that was put into the property.
@@ -445,8 +448,13 @@ all data (currently {self.path_cabinet}):\n"""
 
         path_full = f"{self.path_cabinet}/{file_name}"
 
+        maximum_attribute_index = 0
+        attribute_max_attribute_index = attribute
+
         if not value:
             value = attribute[-1]
+            maximum_attribute_index = -1
+            attribute_max_attribute_index = attribute[:maximum_attribute_index]
 
         _settings = self.settings_json if file_name == 'settings.json' else json.load(
             open(path_full, encoding="utf8"))
@@ -455,11 +463,11 @@ all data (currently {self.path_cabinet}):\n"""
 
         partition = _settings
 
-        for index, item in enumerate(attribute[:-1]):
+        for index, item in enumerate(attribute_max_attribute_index):
             if item not in partition:
                 try:
                     partition[item] = value if index == len(
-                        attribute) - 2 else {}
+                        attribute) + maximum_attribute_index - 1 else {}
                     partition = partition[item]
                     self.log(
                         f"Adding new key '{item}' to {partition if index > 0 else path_full}",
@@ -468,7 +476,7 @@ all data (currently {self.path_cabinet}):\n"""
                     self.log(f"{error}\n\n{attribute[index-1]} is currently a string, so it cannot \
 be treated as an object with multiple properties.", level="error")
             else:
-                if index == len(attribute) - 2:
+                if index == len(attribute) + maximum_attribute_index - 1:
                     partition[item] = value
                 else:
                     partition = partition[item]

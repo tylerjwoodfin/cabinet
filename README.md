@@ -262,6 +262,9 @@ cab --log "Server is on fire" --level "critical"
 - Although I've done quite a bit of testing, I can't guarantee everything that works on my machine will work on yours. Always back up your data to multiple places to avoid data loss.
 - If you find any issues, please contact me... or get your hands dirty and raise a PR!
 
+## Unit Tests
+- Unit tests are available in `test/`; use `pytest test/` to run them.
+
 ## Author
 
 - Tyler Woodfin
