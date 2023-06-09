@@ -350,6 +350,8 @@ all data (currently {self.path_cabinet}):\n"""
             None
         """
 
+        path_edit = self.get("path", "edit")
+
         # edit settings.json if no file_path
         if file_path is None:
             message = (
@@ -363,7 +365,7 @@ all data (currently {self.path_cabinet}):\n"""
             return
 
         # allows for shortcuts by setting paths in settings.json -> path -> edit
-        if file_path in self.get("path", "edit"):
+        if path_edit and file_path in path_edit:
             item = self.get("path", "edit", file_path)
             if not isinstance(item, dict) or "value" not in item.keys():
                 self.log(f"Could not use shortcut for {file_path} \
