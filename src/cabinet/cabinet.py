@@ -307,10 +307,21 @@ class Cabinet:
 
     def _ifprint(self, message: str, is_print: bool):
         """
-        Prints a string if `print` is true.
+        Prints the message if `print` is true.
         """
-        if is_print:
-            print(json.dumps(message, indent=2))
+
+        # check for valid JSON
+        try:
+            json.loads(message)
+            if is_print:
+                print(json.dumps(message, indent=2))
+        except TypeError:
+            if is_print:
+                print(json.dumps(message, indent=2))
+        except json.JSONDecodeError:
+            if is_print:
+                print(message)
+            return message
 
     def configure(self):
         """
