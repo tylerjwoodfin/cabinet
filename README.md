@@ -229,11 +229,11 @@ cab.log("This is fine", level="info")
 
 # writes to a file named LOG_TEMPERATURE
 
-cab.log("30", logName="LOG_TEMPERATURE")
+cab.log("30", log_name="LOG_TEMPERATURE")
 
 # writes to a file named LOG_TEMPERATURE in /home/{username}/weather
 
-cab.log("30", logName="LOG_TEMPERATURE", filePath="/home/{username}/weather")
+cab.log("30", log_name="LOG_TEMPERATURE", file_path="/home/{username}/weather")
 
     # format
     # 2021-12-29 19:29:27,896 — INFO — 30
