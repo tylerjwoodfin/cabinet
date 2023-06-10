@@ -632,6 +632,20 @@ def main():
     package_name = sys.modules[__name__].__package__.split('.')[0]
     version = importlib.metadata.version(package_name)
 
+    class ValidatePutArgs(argparse.Action):
+        """
+        Custom argparse action to validate the number of arguments for the --put option.
+        Ensures that a minimum of 2 arguments are provided.
+        """
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            if len(values) < 2:
+                if len(values) == 1 and values[0] == 'ut':
+                    print("I think you meant to use '--put' or '-p'.\n")
+                parser.error(
+                    f"At least 2 arguments are required for {option_string}")
+            setattr(namespace, self.dest, values)
+
     parser = argparse.ArgumentParser(
         description=f"Cabinet ({version})")
 
@@ -646,7 +660,7 @@ def main():
                         help='(for -ef) Do not create file if it does not exist')
     parser.add_argument('--get', '-g', dest='get', nargs='+',
                         help='Get a property from settings.json')
-    parser.add_argument('--put', '-p', dest='put', nargs='+',
+    parser.add_argument('--put', '-p', dest='put', nargs='+', action=ValidatePutArgs,
                         help='Put a property into settings.json')
     parser.add_argument('--get-file', dest='get_file',
                         type=str, help='Get file')
