@@ -310,7 +310,7 @@ class Cabinet:
         Prints a string if `print` is true.
         """
         if is_print:
-            print(message)
+            print(json.dumps(message, indent=2))
 
     def configure(self):
         """
@@ -472,7 +472,8 @@ all data (currently {self.path_cabinet}):\n"""
                         attribute) + maximum_attribute_index - 1 else {}
                     partition = partition[item]
                     self.log(
-                        f"Adding new key '{item}' to {partition if index > 0 else path_full}",
+                        f"Adding key: {{'{item}': {partition}}} \
+to \"{attribute_max_attribute_index[index-1] if index > 0 else path_full}\"",
                         is_quiet=self.new_setup)
                 except TypeError as error:
                     self.log(f"{error}\n\n{attribute[index-1]} is currently a string, so it cannot \
@@ -486,8 +487,10 @@ be treated as an object with multiple properties.", level="error")
         with open(path_full, 'w+', encoding="utf8") as file:
             json.dump(_settings, file, indent=4)
 
-        self._ifprint(
-            f"{' -> '.join(attribute[:-1])} set to {value}", is_print)
+        self.log(
+            f"{' -> '.join(attribute[:-1])} set to {value}",
+            level='info', is_quiet=not is_print)
+
         return value
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
