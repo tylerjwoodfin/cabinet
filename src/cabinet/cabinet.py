@@ -516,7 +516,6 @@ be treated as an object with multiple properties.", level="error")
                     partition = partition[item]
 
         with open(path_full, 'w+', encoding="utf8") as file:
-            print("Going to default?")
             json.dump(_settings, file, indent=4)
 
         self.log(
