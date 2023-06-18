@@ -16,6 +16,7 @@ import json
 import pathlib
 import logging
 import sys
+import ast
 import argparse
 from datetime import date
 from typing import Optional
@@ -459,20 +460,39 @@ all data (currently {self.path_cabinet}):\n"""
             The value that was put into the property.
         """
 
+        def parse_arg(value):
+            """
+            Infer the value type (e.g. 2 will not be parsed as a string)
+            """
+            if value == "null":
+                return None
+            try:
+                return int(value)
+            except ValueError:
+                try:
+                    return float(value)
+                except ValueError:
+                    if value.lower() == 'true':
+                        return True
+                    if value.lower() == 'false':
+                        return False
+                    try:
+                        return ast.literal_eval(value)
+                    except (SyntaxError, ValueError):
+                        return value
+
         path_full = f"{self.path_cabinet}/{file_name}"
 
         maximum_attribute_index = 0
         attribute_max_attribute_index = attribute
 
         if not value:
-            value = attribute[-1]
+            value = parse_arg(attribute[-1])
             maximum_attribute_index = -1
             attribute_max_attribute_index = attribute[:maximum_attribute_index]
 
         _settings = self.settings_json if file_name == 'settings.json' else json.load(
             open(path_full, encoding="utf8"))
-
-        # iterate through entire JSON object and replace 2nd to last attribute with value
 
         partition = _settings
 
@@ -496,6 +516,7 @@ be treated as an object with multiple properties.", level="error")
                     partition = partition[item]
 
         with open(path_full, 'w+', encoding="utf8") as file:
+            print("Going to default?")
             json.dump(_settings, file, indent=4)
 
         self.log(
