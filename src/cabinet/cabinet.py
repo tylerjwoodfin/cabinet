@@ -105,8 +105,7 @@ class Cabinet:
         except json.decoder.JSONDecodeError as error:
             print(f"{error}\n")
 
-            response = input(f"The settings file ({path_cabinet}/settings.json) is not valid JSON. "
-                             "Do you want to replace it with an empty JSON file? "
+            response = input(f"The settings file ({path_cabinet}/settings.json) is not valid JSON. Do you want to replace it with an empty JSON file? "
                              f"(The existing file will be backed up in {path_cabinet}) (y/n)\n")
 
             if response.lower().startswith("y"):
