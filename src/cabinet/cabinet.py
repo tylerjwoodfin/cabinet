@@ -507,8 +507,9 @@ all data (currently {self.path_cabinet}):\n"""
 to \"{attribute_max_attribute_index[index-1] if index > 0 else path_full}\"",
                         is_quiet=self.new_setup)
                 except TypeError as error:
-                    self.log(f"{error}\n\n{' -> '.join(attribute[:-2])} is currently a string, so it cannot \
-be treated as an object with multiple properties.", level="error")
+                    self.log((f"{error}\n\n{' -> '.join(attribute[:-2])} ",
+                              "is currently a string, so it cannot \
+be treated as an object with multiple properties."), level="error")
             elif not isinstance(partition[item], str):
                 if index == len(attribute) + maximum_attribute_index - 1:
                     partition[item] = value
