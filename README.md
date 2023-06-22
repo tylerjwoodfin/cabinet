@@ -33,12 +33,13 @@ Options:
   --edit, -e              Edit the settings.json file
   --edit-file, -ef        Edit a specific file
   --no-create             (for -ef) Do not create file if it does not exist
-  --get, -g [GET ...]     Get a property from settings.json
-  --put PUT [PUT ...]     Put a property into settings.json
-  --get-file GET_FILE     Get file
+  --get, -g               Get a property from settings.json
+  --put, -p               Put a property into settings.json
+  --remove, -rm           Removes a property from settings.json
+  --get-file              Returns the file specified
   --strip                 (for --get-file) Whether to strip file content whitespace
   --log, -l               Log a message to the default location
-  --level LOG_LEVEL       (for -l) Log level [debug, info, warn, error, critical]
+  --level                 (for -l) Log level [debug, info, warn, error, critical]
   -v, --version           show version number and exit
 
 Mail:
@@ -127,8 +128,7 @@ cab.put("employee", "Tyler", "salary", 7.25)
 
 or terminal:
 ```
-# warning - from the terminal, numeric values in cabinet are stored as strings
-cabinet -p employer Tyler salary 7.25
+cabinet -p employee Tyler salary 7.25
 ```
 
 results in this structure in settings.json:
@@ -161,6 +161,31 @@ cabinet -g employee Tyler salary
 results in:
 ```
 7.25
+```
+
+### `remove`
+
+python:
+```
+from cabinet import Cabinet
+
+cab = Cabinet()
+
+cab.remove("employee", "Tyler", "salary")
+```
+
+or terminal:
+```
+cabinet -rm employee Tyler salary
+```
+
+results in this structure in settings.json:
+```
+{
+    "employee": {
+        "tyler": {}
+    }
+}
 ```
 
 ### `edit_file`
