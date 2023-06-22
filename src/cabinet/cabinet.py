@@ -507,19 +507,67 @@ all data (currently {self.path_cabinet}):\n"""
 to \"{attribute_max_attribute_index[index-1] if index > 0 else path_full}\"",
                         is_quiet=self.new_setup)
                 except TypeError as error:
-                    self.log(f"{error}\n\n{attribute[index-1]} is currently a string, so it cannot \
+                    self.log(f"{error}\n\n{' -> '.join(attribute[:-2])} is currently a string, so it cannot \
 be treated as an object with multiple properties.", level="error")
-            else:
+            elif not isinstance(partition[item], str):
                 if index == len(attribute) + maximum_attribute_index - 1:
                     partition[item] = value
                 else:
                     partition = partition[item]
+            else:
+                self.log(f"{' -> '.join(attribute[:-2])} is currently a string, so it cannot \
+be treated as an object with multiple properties.", level="error")
+                exit(-1)
 
         with open(path_full, 'w+', encoding="utf8") as file:
             json.dump(_settings, file, indent=4)
 
         self.log(
             f"{' -> '.join(attribute[:-1])} set to {value}",
+            level='info', is_quiet=not is_print)
+
+        return value
+
+    def remove(self, *attribute, file_name='settings.json', is_print=False):
+        """
+        Removes a property from a JSON file (default name: settings.json).
+
+        Args:
+            *attribute (str): A series of keys in the JSON object
+                to identify the location of the property.
+            file_name (str): The name of the JSON file to remove the property from.
+                File must be in the `path_cabinet` folder.
+                Default: 'settings.json'
+
+        Returns:
+            The value that was removed from the property.
+            If the property doesn't exist, None is returned.
+        """
+        path_full = f"{self.path_cabinet}/{file_name}"
+
+        _settings = self.settings_json if file_name == 'settings.json' else json.load(
+            open(path_full, encoding="utf8"))
+
+        partition = _settings
+
+        for index, item in enumerate(attribute):
+            if item not in partition:
+                self.log(
+                    (f"Key '{item}' does not exist in"
+                     f" \"{attribute[:index] if index > 0 else path_full}\""),
+                    level="warning")
+                return None
+            elif index == len(attribute) - 1:
+                value = partition[item]
+                del partition[item]
+            else:
+                partition = partition[item]
+
+        with open(path_full, 'w+', encoding="utf8") as file:
+            json.dump(_settings, file, indent=4)
+
+        self.log(
+            f"{' -> '.join(attribute)} removed.",
             level='info', is_quiet=not is_print)
 
         return value
@@ -693,6 +741,8 @@ def main():
                         help='Get a property from settings.json')
     parser.add_argument('--put', '-p', dest='put', nargs='+', action=ValidatePutArgs,
                         help='Put a property into settings.json')
+    parser.add_argument('--remove', '-rm', dest='remove',
+                        nargs='+', help='Remove a property from settings.json')
     parser.add_argument('--get-file', dest='get_file',
                         type=str, help='Get file')
     parser.add_argument('--strip', dest='strip', action='store_false',
@@ -729,6 +779,9 @@ def main():
     elif args.put:
         attribute_values = args.put
         cab.put(*attribute_values, is_print=True)
+    elif args.remove:
+        attribute_values = args.remove
+        cab.remove(*attribute_values, is_print=True)
     elif args.get_file:
         cab.get_file_as_array(item=args.get_file,
                               file_path=None, strip=args.strip)
