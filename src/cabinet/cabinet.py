@@ -480,6 +480,9 @@ all data (currently {self.path_cabinet}):\n"""
                         return ast.literal_eval(value)
                     except (SyntaxError, ValueError):
                         return value
+            except TypeError:
+                # 'dict' objects or similar can just return original value
+                return value
 
         path_full = f"{self.path_cabinet}/{file_name}"
 
