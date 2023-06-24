@@ -2,6 +2,8 @@
 Messages found throughout Cabinet
 """
 
+import pathlib
+
 NEW_SETUP_MSG_INTRO = (
     "Welcome to Cabinet!\n\n"
     "Do you have a MongoDB instance set up? (y/n)\n"
@@ -40,6 +42,14 @@ Enter your MongoDB cluster name:\n
 
 CONFIG_MONGODB_DB_NAME = """
 Enter your MongoDB database name:\n
+"""
+
+CONFIG_PATH_CABINET = f"""
+Enter the full path where you would like to store Cabinet data,
+such as logs and settings.
+
+\n
+Default: /home/{pathlib.Path.home().resolve()}/.cabinet
 """
 
 ERROR_CONFIG_FILE_NOT_FOUND = """
