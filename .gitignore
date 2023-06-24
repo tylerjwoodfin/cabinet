@@ -4,3 +4,4 @@ settings.json
 log/*
 dist/
 src/cabinet.egg-info
+database.json
