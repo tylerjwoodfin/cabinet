@@ -259,7 +259,7 @@ class Cabinet:
         Opens the configuration file for editing using the default editor.
 
         If the function is called from a terminal, the configuration file is opened with the default
-        editor defined in the 'EDITOR' environment variable. 
+        editor defined in the 'EDITOR' environment variable.
         If the 'EDITOR' variable is not set, 'vi'
         is used as the default editor.
 
@@ -279,7 +279,7 @@ class Cabinet:
         edit the configuration file.
 
         Raises:
-            FileNotFoundError: 
+            FileNotFoundError:
                 If the default editor or the associated application for opening files is not found.
 
         Notes:
