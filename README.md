@@ -1,19 +1,28 @@
 # cabinet
-A Python library to easily store data across multiple projects in one or more JSON files.
+A Python library to easily manage data with MongoDB and across other files.
 
 Supports a cli, email, and event logging.
 
+## MongoDB Update! - 2023-06-25
+- In this latest release, the tool has been redesigned from the ground up to use MongoDB.
+- MongoDB elevates Cabinet to the best of both worlds: a secure database with the ability to edit 
+  as if it were a JSON structure.
+- Every function has been tested for compatibility with earlier releases, but it's likely
+  there will be some edge case bugs to iron out. I use this tool extremely often in my day-to-day
+  use, so these should be patched quickly, once discovered. Please report issues as you find them.
+
 ## Features
 
-- Read and write data in the JSON files of your choice
+- Read and write data in MongoDB and/or the JSON files of your choice
+- Provides easy shortcuts to MongoDB actions
 - Log to a file/directory of your choice without having to configure `logger` each time
 - Send/receive mail using `cabinet.Cabinet().mail()`
 
 ## Structure
 
-- Data is stored in a `settings.json` file in the location of your choice
-- Logs are written to `{/path/to/cabinet}/log/LOG_DAILY_YYYY-MM-DD` by default
-  - this can be changed on a per-log basis
+- Data is stored in MongoDB; simply plug in your credentials.
+- Logs are written to `~/.cabinet/log/LOG_DAILY_YYYY-MM-DD` by default
+  - this can be changed as needed (per log or otherwise)
 
 ## Installation and Setup
 
@@ -30,12 +39,13 @@ Usage: cabinet [OPTIONS]
 Options:
   -h, --help              Show this help message and exit
   --configure, -config    Configure
-  --edit, -e              Edit the settings.json file
+  --export                Export the data in MongoDB to a JSON file
+  --edit, -e              Edit MongoDB in the default editor as a JSON file
   --edit-file, -ef        Edit a specific file
   --no-create             (for -ef) Do not create file if it does not exist
-  --get, -g               Get a property from settings.json
-  --put, -p               Put a property into settings.json
-  --remove, -rm           Removes a property from settings.json
+  --get, -g               Get a property from MongoDB (nesting supported)
+  --put, -p               Put a property into MongoDB (nesting supported)
+  --remove, -rm           Removes a property from MongoDB
   --get-file              Returns the file specified
   --strip                 (for --get-file) Whether to strip file content whitespace
   --log, -l               Log a message to the default location
@@ -52,7 +62,9 @@ Mail:
 
 ## Configuration
 
-- Upon first launch, will prompt you to choose a location for `settings.json`. You can change this at any time with `cabinet --config`.
+- Upon first launch, the tool will prompt you to enter your MongoDB credentials, as well as
+  the cluster name and Database name. These are stored only within the package, as a file named
+  `cabinet_config.json`.
 
 ### edit_file() shortcuts
 - see example below to enable something like
@@ -89,7 +101,7 @@ cabinet -p edit todo value "/home/{username}/path/to/whatever.md"
 
 - It is NEVER a good idea to store your password in plaintext; for this reason, I strongly recommend a "throwaway" account that is only used for sending emails
 - Gmail (as of May 2022) and most other mainstream email providers won't work with this; for support, search for sending mail from your email provider with `smtplib`.
-- In `settings.json`, add the `email` object to make your settings file look like this example:
+- In MongoDB, add the `email` object to make your settings file look like this example:
 
 file:
 ```
@@ -131,7 +143,7 @@ or terminal:
 cabinet -p employee Tyler salary 7.25
 ```
 
-results in this structure in settings.json:
+results in this structure in MongoDB:
 ```
 {
     "employee": {
@@ -179,7 +191,7 @@ or terminal:
 cabinet -rm employee Tyler salary
 ```
 
-results in this structure in settings.json:
+results in this structure in MongoDB:
 ```
 {
     "employee": {

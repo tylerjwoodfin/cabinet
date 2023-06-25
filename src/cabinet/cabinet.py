@@ -10,182 +10,137 @@ Usage:
     cab = Cabinet()
     ```
 """
-
 import os
-import json
-import pathlib
-import logging
-import sys
 import ast
+import sys
+import json
 import argparse
-from datetime import date
-from typing import Optional
+import logging
 import importlib.metadata
+import getpass
+import pathlib
+import subprocess
+from datetime import date, datetime
+from typing import Optional
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+from bson import json_util, ObjectId
+from .constants import (
+    NEW_SETUP_MSG_INTRO,
+    NEW_SETUP_MSG_MONGODB_INSTRUCTIONS,
+    CONFIG_MONGODB_USERNAME,
+    CONFIG_MONGODB_PASSWORD,
+    CONFIG_MONGODB_CLUSTER_NAME,
+    CONFIG_MONGODB_DB_NAME,
+    CONFIG_PATH_CABINET,
+    ERROR_CONFIG_FILE_NOT_FOUND,
+    ERROR_CONFIG_MISSING_VALUES,
+    ERROR_CONFIG_JSON_DECODE
+)
 from .mail import Mail
 
 
 class Cabinet:
     """
-    The main class for Cabinet
+    Cabinet class
     """
 
-    path_cabinet: str = None
-    path_config_file: str = None
-    path_settings_file: str = None
-    path_log: str = None
-    settings_json = None
+    mongodb_username: str = ''
+    mongodb_password: str = ''
+    mongodb_cluster_name: str = ''
+    mongodb_db_name: str = ''
+    mongodb_uri = ""
+    client: MongoClient = None
+    database = None
     new_setup: bool = False
-
-    NEW_SETUP_MSG = (
-        "Welcome to Cabinet!\n\n"
-        "Enter the directory to store the default settings.json.\n"
-        "This should be an absolute path in a public place, like "
-        f"{pathlib.Path.home().resolve()}/cabinet.\n\n"
-        "Don't worry, this won't overwrite anything in this folder.\n"
-        "By continuing, a new configuration file will be created in your site-packages folder.\n\n"
-    )
-
-    def __init__(self, path_cabinet: str = None):
-        """
-        The main module for file management
-
-        Args:
-            - path_cabinet (str, optional): the directory of a settings.json file to be used
-                Defaults to get_config('path_cabinet') or ~/cabinet if unset
-
-        Returns:
-            None
-
-        Usage:
-            ```
-            from cabinet import Cabinet
-            cab = cabinet.Cabinet()
-            ```
-        """
-
-        # config file, stored within the package
-        self.path_config_file = str(pathlib.Path(
-            __file__).resolve().parent / "config.json")
-
-        # determines where settings.json is stored; by default, this is ~/cabinet
-        self.path_cabinet = path_cabinet or os.path.expanduser(
-            self._get_config('path_cabinet'))
-
-        path_cabinet = self.path_cabinet
-
-        # new setup
-        if path_cabinet is None:
-            self.new_setup = True
-            path_cabinet = input(self.NEW_SETUP_MSG)
-            if not path_cabinet:
-                path_cabinet = str(pathlib.Path.home() / "cabinet")
-
-        self.path_settings_file = pathlib.Path(path_cabinet) / "settings.json"
-
-        try:
-            with open(f'{path_cabinet}/settings.json', 'r+', encoding="utf8") as file:
-                file.seek(0, os.SEEK_END)
-        except FileNotFoundError:
-            # initialize settings file if it doesn't exist
-            if not os.path.exists(path_cabinet):
-                os.makedirs(path_cabinet)
-            with open(f'{path_cabinet}/settings.json', 'x+', encoding="utf8") as file:
-                new_file_msg = ("\n\nWarning: settings.json not found; "
-                                f"created a blank one in {path_cabinet}")
-                self._ifprint(new_file_msg,
-                              self.new_setup is False)
-                self._ifprint("You can change this location by calling 'cabinet config'.\n\n",
-                              self.new_setup is False)
-                file.write('{}')
-
-        try:
-            self.settings_json = json.load(
-                open(f'{path_cabinet}/settings.json', encoding="utf8"))
-
-        except json.decoder.JSONDecodeError as error:
-            print(f"{error}\n")
-
-            response = input(f"The settings file ({path_cabinet}/settings.json) is not valid JSON. "
-                             "Do you want to replace it with an empty JSON file? "
-                             f"(The existing file will be backed up in {path_cabinet}) (y/n)\n")
-
-            if response.lower().startswith("y"):
-                print("Backing up...")
-
-                # for some reason, this only works when you call touch; TODO fix this
-                os.system(
-                    f"touch {path_cabinet}/settings-backup.json \
-                        && cp {path_cabinet}/settings.json {path_cabinet}/settings-backup.json")
-                print(f"Backed up to {path_cabinet}/settings-backup.json")
-                with open(f'{path_cabinet}/settings.json', 'w+', encoding="utf8") as file:
-                    file.write('{}')
-                print("Done. Please try your last command again.")
-            else:
-                print(
-                    f"OK. Please fix {path_cabinet}/settings.json and try again.")
-
-            sys.exit(-1)
-
-        path_log = self.get('path', 'log')
-
-        if path_log is None:
-            path_log = self.put(
-                'path', 'log', f"{path_cabinet}/log", file_name='settings.json')
-            print(
-                f"\nCalling cabinet.log in Python (or 'cabinet --log' in the terminal) "
-                f"will write to {path_cabinet}/log by default.\n"
-                f"You can change this in {path_cabinet}/settings.json.\n\n"
-            )
-        if not os.path.exists(path_log):
-            os.makedirs(path_log)
-        if not path_log[-1] == '/':
-            path_log += '/'
-
-        self.path_log = path_log
-        self.new_setup = False
+    path_config_file = str(pathlib.Path(
+        __file__).resolve().parent / "cabinet_config.json")
+    path_cabinet: str = None
+    path_log: str = None
 
     def _get_config(self, key=None):
         """
-        Gets a property from the internal configuration file.
+        Retrieves the value associated with the specified key from the configuration file.
 
         Args:
-        - key (str): The key to search for in the JSON file.
+            key (str): The key to retrieve the corresponding value.
+                - If None, the entire configuration dictionary is returned.
+                - Default is None.
 
         Returns:
-        - The value of the key in the JSON file.
+            The value associated with the specified key in the configuration file. If the key is not
+            found, an empty string is returned.
 
-        If the JSON file does not exist or is not valid JSON,
-            the function provides default behavior:
-        - If `key` is `path_cabinet`, the function prompts
-            the user to enter a directory to store settings.json.
-        - If `key` is not found, the function returns an empty string.
-        - If the file is not valid JSON, the function prompts
-            the user to replace the file with an empty JSON file.
+        Raises:
+            FileNotFoundError: If the configuration file is not found.
+            KeyError: If the key is not found in the configuration file.
+            JSONDecodeError: If there is a problem decoding the JSON data in the configuration file.
+
+        Notes:
+            If the key is 'mongodb_username' and the configuration file is not found,
+            the user will be prompted to set up a new configuration.
+            The value for 'mongodb_username' will be obtained
+            from the user input.
+
+            If the key is 'mongodb_password', 'mongodb_cluster_name',
+            'mongodb_db_name', or 'path_cabinet'
+            and the new_setup flag is True, the user will be prompted to
+            enter the corresponding value
+            for the new configuration.
+
+            If the JSON data in the configuration file is not valid,
+            the user will be given the option
+            to overwrite the file with an empty dictionary or fix the file manually.
+
         """
 
         try:
             with open(self.path_config_file, 'r+', encoding="utf8") as file:
                 return json.load(file)[key]
         except FileNotFoundError:
-            if key == 'path_cabinet':
+            if key == 'mongodb_username':
                 # setup
                 self.new_setup = True
-                path_cabinet = input(self.NEW_SETUP_MSG)
+                has_mongodb = input(NEW_SETUP_MSG_INTRO)
 
-                self._put_config(key, path_cabinet)
-                return path_cabinet
+                value = ''
+                if has_mongodb.lower().startswith('y'):
+                    value = input(CONFIG_MONGODB_USERNAME)
+                else:
+                    input(NEW_SETUP_MSG_MONGODB_INSTRUCTIONS)
+                    value = input(CONFIG_MONGODB_USERNAME)
+
+                self._put_config(key, value)
+                return value
+            else:
+                print(f"{ERROR_CONFIG_FILE_NOT_FOUND}\n")
         except KeyError:
-            print(f"Warning: Key error for key: {key}")
+            if self.new_setup:
+                if key == 'mongodb_password':
+                    value = getpass.getpass(CONFIG_MONGODB_PASSWORD)
+                    self._put_config(key, value)
+                if key == 'mongodb_cluster_name':
+                    value = input(CONFIG_MONGODB_CLUSTER_NAME)
+                    self._put_config(key, value)
+                if key == 'mongodb_db_name':
+                    value = input(CONFIG_MONGODB_DB_NAME)
+                    self._put_config(key, value)
+                if key == 'path_cabinet':
+                    value = input(CONFIG_PATH_CABINET)
+                    self._put_config(key, value)
+                return value
+            else:
+                print(
+                    f"Warning: Could not find {key} in {self.path_config_file}")
             return ""
         except json.decoder.JSONDecodeError:
-            response = input(
-                f"The config file ({self.path_config_file}) is not valid JSON.\n"
-                "Do you want to replace it with an empty JSON file? "
-                "(you will lose existing data) (y/n)\n")
+            err_msg = f"Problem reading {self.path_config_file}.\n\n{ERROR_CONFIG_JSON_DECODE}"
+            response = input(err_msg)
+
             if response.lower().startswith("y"):
                 with open(self.path_config_file, 'w+', encoding="utf8") as file:
                     file.write('{}')
-                print("Done. Please try your last command again.")
+                print("Done. Please try again.")
             else:
                 print(f"OK. Please fix {self.path_config_file} and try again.")
 
@@ -209,28 +164,6 @@ class Cabinet:
         if value == "":
             print("No changes were made.")
             sys.exit(1)
-        else:
-
-            # error correction
-            if key == 'path_cabinet' and value[0] != '/' and value[0] != '~':
-                value = f"/{value}"
-            if key == 'path_cabinet' and value[-1] == '/':
-                value = f"{value[:-1]}"
-
-            # warn about potential problems
-            if not os.path.exists(os.path.expanduser(value)):
-                print(f"Warning: {value} doesn't exist.")
-                create_dir = input(
-                    "Do you want to create the directory? (y/n): ")
-                if create_dir.lower().startswith("y"):
-                    os.makedirs(os.path.expanduser(value))
-                    print("Done.")
-                else:
-                    print("OK, but if you run into problems, "
-                          "run 'cabinet --config' to change to an existing directory.")
-            if value[0] == '~':
-                print("Warning: using tilde expansions may cause problems ",
-                      "if using cabinet for multiple users. It is recommended to use full paths.""")
 
         try:
             with open(self.path_config_file, 'r+', encoding="utf8") as file:
@@ -248,63 +181,10 @@ class Cabinet:
         with open(self.path_config_file, 'w+', encoding="utf8") as file:
             json.dump(config, file, indent=4)
 
-        print(f"\n\nUpdated configuration file ({self.path_config_file}).")
+        print(f"\nUpdated configuration file ({self.path_config_file}).")
         self._ifprint(f"{key} is now {value}\n", self.new_setup is False)
 
         return value
-
-    def _get_logger(self, log_name: str = None, level: int = logging.INFO,
-                    file_path: str = None, is_quiet: bool = False) -> logging.Logger:
-        """
-        A helper function for log()
-
-        Returns a customized logger object with the specified name and level,
-        and optionally logs to a file.
-
-        Args:
-        - log_name (str): the name of the logger (defaults to 'root')
-        - level (int): the logging level to use (defaults to logging.INFO)
-        - file_path (str): the path to a file to log to
-            (defaults to None, meaning log only to console)
-        - is_quiet (bool): if True, only logs to file and not to console (defaults to False)
-
-        Returns:
-        - logger (Logger): the configured logger object
-        """
-
-        today = str(date.today())
-
-        if file_path is None:
-            file_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
-        if log_name is None:
-            log_name = f"LOG_DAILY_{today}"
-
-        # create path if necessary
-        if not os.path.exists(file_path):
-            self._ifprint(f"Creating {file_path}", self.new_setup is True)
-            os.makedirs(file_path)
-
-        logger = logging.getLogger(log_name)
-
-        logger.setLevel(level)
-
-        if logger.handlers:
-            logger.handlers = []
-
-        format_string = "%(asctime)s — %(levelname)s — %(message)s"
-        log_format = logging.Formatter(format_string)
-
-        if not is_quiet:
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(log_format)
-            logger.addHandler(console_handler)
-
-        file_handler = logging.FileHandler(
-            f"{file_path}/{log_name}.log", mode='a')
-        file_handler.setFormatter(log_format)
-
-        logger.addHandler(file_handler)
-        return logger
 
     def _ifprint(self, message: str, is_print: bool):
         """
@@ -324,22 +204,169 @@ class Cabinet:
                 print(message)
             return message
 
-    def configure(self):
+    def __init__(self, path_cabinet: str = None):
         """
-        Configures the Cabinet instance based on command line arguments or user input.
+        Initializes the Cabinet instance with the provided or default configuration.
+
+        Args:
+            path_cabinet (str, optional): The path to the cabinet directory. Defaults to None.
+
+        Notes:
+            - The configuration is read from the `cabinet_config.json` internal file
+            file located in the 'path_cabinet' directory.
+            - If 'path_cabinet' is not provided, the default location
+            is '~/.cabinet'.
+            - The attributes of the Cabinet instance are set based on the configuration values.
+
         """
 
-        message = f"""
-Enter the full path of the directory where you want to store
-all data (currently {self.path_cabinet}):\n"""
+        self.path_cabinet = path_cabinet or os.path.expanduser(
+            self._get_config('path_cabinet'))
 
-        self._put_config('path_cabinet', input(message))
+        # these should match class attributes above
+        keys = ["mongodb_username", "mongodb_password",
+                "mongodb_cluster_name", "mongodb_db_name", "path_cabinet"]
 
-    def edit(self):
+        for key in keys:
+            value = self._get_config(key)
+            setattr(self, key, value)
+
+        if any(getattr(self, key) is None or getattr(self, key) == '' for key in keys):
+            input(ERROR_CONFIG_MISSING_VALUES)
+            self.config()
+
+        self.new_setup = False
+        self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
+                    f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
+                    f"{self.mongodb_db_name}?retryWrites=true&w=majority")
+        self.client = MongoClient(self.uri, server_api=ServerApi('1'))
+        self.database = self.client.cabinet
+
+        path_log = self.get('path', 'log') or '~/.cabinet/log'
+
+        expanded_path = os.path.expanduser(path_log)
+        directory_path = os.path.abspath(expanded_path)
+        directory_path_with_slash = os.path.join(directory_path, '')
+
+        # Create the directory if it doesn't exist
+        if not os.path.exists(directory_path_with_slash):
+            os.makedirs(directory_path_with_slash)
+
+        self.path_log = directory_path_with_slash
+
+    def config(self):
         """
-        Edits and saves the settings file.
+        Opens the configuration file for editing using the default editor.
+
+        If the function is called from a terminal, the configuration file is opened with the default
+        editor defined in the 'EDITOR' environment variable. 
+        If the 'EDITOR' variable is not set, 'vi'
+        is used as the default editor.
+
+        If the function is called from a non-terminal environment, 
+        such as a graphical user interface,
+        the behavior depends on the operating system:
+        - On Windows, the configuration file is opened using 
+        the default associated editor for JSON files.
+        - On macOS, the configuration file is opened using
+        the default application associated with JSON files.
+        - On Linux, the configuration file is opened using
+        the default application for opening files with
+        the 'xdg-open' command.
+
+        If none of the above conditions are met, a message is displayed
+        instructing the user to manually
+        edit the configuration file.
+
+        Raises:
+            FileNotFoundError: 
+                If the default editor or the associated application for opening files is not found.
+
+        Notes:
+            - The configuration file is defined by the 'path_config_file' attribute of the class.
+            - The function uses the 'subprocess.run' method
+            to execute the necessary command for opening the file.
+            - The 'check=True' argument ensures that an error
+            is raised if the command execution fails.
+
         """
-        self.edit_file(self.path_settings_file)
+
+        if os.isatty(sys.stdin.fileno()):
+            # User is in a terminal, open with default editor
+            try:
+                subprocess.run(
+                    [os.environ.get('EDITOR', 'vi'), self.path_config_file], check=True)
+            except FileNotFoundError:
+                print("Default editor not found. Unable to open the file.")
+        else:
+            if sys.platform.startswith('win32'):
+                # Windows
+                subprocess.run(
+                    ['start', '', self.path_config_file], shell=True, check=True)
+            elif sys.platform.startswith('darwin'):
+                # macOS
+                subprocess.run(['open', self.path_config_file], check=True)
+            elif sys.platform.startswith('linux'):
+                # Linux
+                subprocess.run(['xdg-open', self.path_config_file], check=True)
+            else:
+                print(f"Please edit ${self.path_config_file} to configure.")
+
+    def edit_db(self):
+        """
+        Opens the data in self.database.cabinet within a JSON file in Vim.
+        When the file is closed, it replaces the data in this collection in MongoDB.
+        """
+
+        # Export the data from the collection to a JSON file
+        collection_data = self.database.cabinet.find()
+        json_data = json.dumps(list(collection_data),
+                               indent=4, default=json_util.default)
+
+        temp_file_path = "temp_mongodb_cabinet.json"
+
+        try:
+            # Write the JSON data to a temporary file
+            with open(temp_file_path, "w", encoding="utf-8") as temp_file:
+                temp_file.write(json_data)
+
+            # Open the temporary file in Vim
+            subprocess.run(["vim", temp_file_path], check=True)
+
+            # Read the modified JSON data from the temporary file
+            with open(temp_file_path, "r", encoding="utf-8") as temp_file:
+                modified_json_data = temp_file.read()
+
+            # Check if any changes were made
+            if modified_json_data == json_data:
+                print("No changes.")
+                return
+
+            # Replace the data in the collection with the modified data
+            modified_data = json.loads(modified_json_data)
+            for document in modified_data:
+                document.pop("_id", None)  # Remove the existing _id field
+                document["_id"] = ObjectId()  # Assign a new ObjectId
+
+            self.database.cabinet.drop()  # Drop the existing collection
+            self.database.cabinet.insert_many(
+                modified_data)  # Insert the modified data
+
+            print("Data in the collection has been updated.")
+
+        except FileNotFoundError:
+            print("Error: Temporary file not found.")
+        except subprocess.CalledProcessError:
+            print("Error: Failed to open the file in Vim.")
+        except json.JSONDecodeError:
+            print("Error: Failed to parse the modified JSON data.")
+        except Exception as error:  # pylint: disable=W0703
+            print(f"Error: {str(error)}")
+
+        finally:
+            # Remove the temporary file
+            subprocess.run(["rm", temp_file_path], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def edit_file(self, file_path: str = None, create_if_not_exist: bool = True) -> None:
         """
@@ -347,8 +374,7 @@ all data (currently {self.path_cabinet}):\n"""
 
         Args:
             - file_path (str, optional): The path to the file to edit.
-                Allows for shortcuts by setting paths in settings.json -> path -> edit
-                If unset, edit settings.json
+                Allows for shortcuts by setting paths in MongoDB -> path -> edit
 
             - create_if_not_exist (bool, optional): Whether to create the file if it does not exist.
                 Defaults to False.
@@ -364,19 +390,21 @@ all data (currently {self.path_cabinet}):\n"""
 
         path_edit = self.get("path", "edit")
 
-        # edit settings.json if no file_path
+        # edit MongoDB Directly if no file_path
         if file_path is None:
-            message = (
+            path = input(
                 "Enter the path of the file you want to edit "
-                f"(default: {self.path_cabinet}/settings.json):\n"
+                "(default: edit Cabinet's MongoDB collection):\n"
             )
 
-            path = self.path_settings_file or input(
-                message) or f"{self.path_cabinet}/settings.json"
+            if path == "":
+                self.edit_db()
+                return
+
             self.edit_file(path)
             return
 
-        # allows for shortcuts by setting paths in settings.json -> path -> edit
+        # allows for shortcuts by setting paths in MongoDB -> path -> edit
         if path_edit and file_path in path_edit:
             item = self.get("path", "edit", file_path)
             if not isinstance(item, dict) or "value" not in item.keys():
@@ -405,59 +433,33 @@ all data (currently {self.path_cabinet}):\n"""
         if original_contents == new_contents:
             print("No changes.")
 
-    def get(self, *attributes, warn_missing=False, is_print=False):
+    def merge_nested_data(self, existing_data, new_data):
         """
-        Returns a property in a JSON file based on the input attributes.
-
-        Args:
-            - attributes (str): the attributes to traverse in the JSON file
-            - warn_missing (bool, optional): whether to warn if an attribute is missing
-
-        Returns:
-            - The value of the attribute if it exists in the JSON file, otherwise default.
-
-        Usage:
-            - get('person', 'tyler', 'salary') returns person -> tyler -> salary from self.settings
+        Merge Nested Data
         """
+        merged_data = {}
 
-        if self.settings_json is None:
-            self._ifprint("None", is_print)
-            return None
-
-        settings = self.settings_json
-
-        for index, item in enumerate(attributes):
-            if item in settings:
-                settings = settings[item]
-            elif warn_missing and (len(attributes) < 2 or attributes[1] != "edit"):
-                msg_settings = settings if index > 0 else f'{self.path_cabinet}/settings.json'
-                self._ifprint(
-                    f"Warning: {item} not found in {msg_settings}",
-                    is_print)
-                self._ifprint("None", is_print)
-                return None
+        for key, value in existing_data.items():
+            if key in new_data and isinstance(value, dict) and isinstance(new_data[key], dict):
+                merged_data[key] = self.merge_nested_data(value, new_data[key])
             else:
-                self._ifprint("None", is_print)
-                return None
+                merged_data[key] = value
 
-        self._ifprint(settings, is_print)
-        return settings
+        for key, value in new_data.items():
+            if key not in merged_data:
+                merged_data[key] = value
+            else:
+                if isinstance(value, dict) and isinstance(merged_data[key], dict):
+                    merged_data[key] = self.merge_nested_data(
+                        merged_data[key], value)
+                else:
+                    merged_data[key] = value
 
-    def put(self, *attribute, value=None, file_name='settings.json', is_print=False):
+        return merged_data
+
+    def put(self, *attribute, value=None, is_print: bool = False):
         """
-        Adds or replaces a property in a JSON file (default name: settings.json).
-
-        Args:
-            *attribute (str): A series of keys in the JSON object
-                to identify the location of the property.
-            value (optional): The value to put into the property.
-                If not specified, the last argument will be used.
-            file_name (str): The name of the JSON file to put the property in.
-                File must be in the `path_cabinet` folder.
-                Default: 'settings.json'
-
-        Returns:
-            The value that was put into the property.
+        Adds or replaces a property
         """
 
         def parse_arg(value):
@@ -481,100 +483,207 @@ all data (currently {self.path_cabinet}):\n"""
                     except (SyntaxError, ValueError):
                         return value
             except TypeError:
-                # 'dict' objects or similar can just return original value
                 return value
 
-        path_full = f"{self.path_cabinet}/{file_name}"
+        custom_filter = {}
 
-        maximum_attribute_index = 0
-        attribute_max_attribute_index = attribute
-
-        if not value:
+        if value is None:  # Check if value argument is None
             value = parse_arg(attribute[-1])
-            maximum_attribute_index = -1
-            attribute_max_attribute_index = attribute[:maximum_attribute_index]
 
-        _settings = self.settings_json if file_name == 'settings.json' else json.load(
-            open(path_full, encoding="utf8"))
+        cache = attribute[-1]
+        json_structure = {}
+        for item in reversed(attribute[:-1]):
+            try:
+                json_structure = {}
+                json_structure[item] = cache
+                cache = json_structure
+            except TypeError as error:
+                print(error)
 
-        partition = _settings
+        existing_data = self.database.cabinet.find_one({}, {"_id": 0})
 
-        for index, item in enumerate(attribute_max_attribute_index):
-            if item not in partition:
-                try:
-                    partition[item] = value if index == len(
-                        attribute) + maximum_attribute_index - 1 else {}
-                    partition = partition[item]
-                    self.log(
-                        f"Adding key: {{'{item}': {partition}}} \
-to \"{attribute_max_attribute_index[index-1] if index > 0 else path_full}\"",
-                        is_quiet=self.new_setup)
-                except TypeError as error:
-                    self.log((f"{error}\n\n{' -> '.join(attribute[:-2])} ",
-                              "is currently a string, so it cannot \
-be treated as an object with multiple properties."), level="error")
-            elif not isinstance(partition[item], str):
-                if index == len(attribute) + maximum_attribute_index - 1:
-                    partition[item] = value
-                else:
-                    partition = partition[item]
-            else:
-                self.log(f"{' -> '.join(attribute[:-2])} is currently a string, so it cannot \
-be treated as an object with multiple properties.", level="error")
-                exit(-1)
+        # Merge the new data with the existing data
+        update = {"$set": {}}
 
-        with open(path_full, 'w+', encoding="utf8") as file:
-            json.dump(_settings, file, indent=4)
+        if len(attribute) > 2:
+            update["$set"][attribute[0]] = self.merge_nested_data(existing_data.get(
+                attribute[0], {}), json_structure[attribute[0]])
+        else:
+            update = {"$set": json_structure}
 
-        self.log(
-            f"{' -> '.join(attribute[:-1])} set to {value}",
-            level='info', is_quiet=not is_print)
+        result = self.database.cabinet.update_many(custom_filter, update)
+
+        if is_print:
+            print(f"Modified {result.modified_count} item(s)")
+            print(
+                f"{' -> '.join(attribute[:-1])} set to {value}\n")
 
         return value
 
-    def remove(self, *attribute, file_name='settings.json', is_print=False):
+    def get(self, *attributes, warn_missing=False, is_print=False):
         """
-        Removes a property from a JSON file (default name: settings.json).
+        Returns a property from MongoDB based on the input attributes.
 
         Args:
-            *attribute (str): A series of keys in the JSON object
-                to identify the location of the property.
-            file_name (str): The name of the JSON file to remove the property from.
-                File must be in the `path_cabinet` folder.
-                Default: 'settings.json'
+            - attributes (str): the attributes check in MongoDB
+            - warn_missing (bool, optional): whether to warn if an attribute is missing
+            - is_print (bool, optional): whether to print the return value
 
         Returns:
-            The value that was removed from the property.
-            If the property doesn't exist, None is returned.
+            - The value of the attribute if it exists in MongoDB, otherwise default.
+
+        Usage:
+            - get('person', 'tyler', 'salary') returns person -> tyler -> salary from self.db
         """
-        path_full = f"{self.path_cabinet}/{file_name}"
 
-        _settings = self.settings_json if file_name == 'settings.json' else json.load(
-            open(path_full, encoding="utf8"))
+        collection = self.database.cabinet
 
-        partition = _settings
+        document = collection.find_one(
+            {}, {attribute: 1 for attribute in attributes})
 
-        for index, item in enumerate(attribute):
-            if item not in partition:
-                self.log(
-                    (f"Key '{item}' does not exist in"
-                     f" \"{attribute[:index] if index > 0 else path_full}\""),
-                    level="warning")
-                return None
-            elif index == len(attribute) - 1:
-                value = partition[item]
-                del partition[item]
-            else:
-                partition = partition[item]
+        if document:
+            result = document
+            for attribute in attributes:
+                if attribute in result:
+                    result = result[attribute]
+                else:
+                    if warn_missing:
+                        self.log(
+                            f"Attribute '{attribute}' is missing", level="warn")
+                    return None
+        else:
+            if warn_missing:
+                self.log("No document found in MongoDB", level="warn")
+            return None
 
-        with open(path_full, 'w+', encoding="utf8") as file:
-            json.dump(_settings, file, indent=4)
+        if is_print:
+            print(result)
 
-        self.log(
-            f"{' -> '.join(attribute)} removed.",
-            level='info', is_quiet=not is_print)
+        return result
 
-        return value
+    def remove(self, *attribute, is_print: bool = False):
+        """
+        Removes a property from the data
+        """
+
+        custom_filter = {}
+
+        cache = attribute[-1]
+        json_structure = {}
+        for item in reversed(attribute[:-1]):
+            try:
+                json_structure = {}
+                json_structure[item] = cache
+                cache = json_structure
+            except TypeError as error:
+                print(error)
+
+        if len(attribute) > 1:
+            update = {"$unset": {attribute[0]: json_structure[attribute[0]]}}
+        else:
+            json_structure[attribute[0]] = 1
+            update = {"$unset": json_structure}
+
+        result = self.database.cabinet.update_many(custom_filter, update)
+
+        if is_print:
+            print(f"Modified {result.modified_count} item(s)")
+            print(f"{' -> '.join(attribute)} removed\n")
+
+    def log(self, message: str = '', log_name: str = None, level: str = None,
+            file_path: str = None, is_quiet: bool = False) -> None:
+        """
+        Logs a message using the specified log level
+        and writes it to a file if a file path is provided.
+
+        Args:
+            message (str, optional): The message to log. Defaults to ''.
+            log_name (str, optional): The name of the logger to use. Defaults to None.
+            level (str, optional): The log level to use.
+                Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
+                Defaults to 'info'.
+            file_path (str, optional): The path to the log file.
+                If not provided, logs will be saved to MongoDB -> path -> log.
+                Defaults to None.
+            is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
+
+        Raises:
+            ValueError: If an invalid log level is provided.
+
+        Returns:
+            None
+        """
+
+        def _get_logger(log_name: str = None, level: int = logging.INFO,
+                        file_path: str = None, is_quiet: bool = False) -> logging.Logger:
+            """
+            A helper function for log()
+
+            Returns a customized logger object with the specified name and level,
+            and optionally logs to a file.
+
+            Args:
+            - log_name (str): the name of the logger (defaults to 'root')
+            - level (int): the logging level to use (defaults to logging.INFO)
+            - file_path (str): the path to a file to log to
+                (defaults to None, meaning log only to console)
+            - is_quiet (bool): if True, only logs to file and not to console (defaults to False)
+
+            Returns:
+            - logger (Logger): the configured logger object
+            """
+
+            today = str(date.today())
+
+            if file_path is None:
+                file_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
+            if log_name is None:
+                log_name = f"LOG_DAILY_{today}"
+
+            # create path if necessary
+            if not os.path.exists(file_path):
+                self._ifprint(f"Creating {file_path}", self.new_setup is True)
+                os.makedirs(file_path)
+
+            logger = logging.getLogger(log_name)
+
+            logger.setLevel(level)
+
+            if logger.handlers:
+                logger.handlers = []
+
+            format_string = "%(asctime)s — %(levelname)s — %(message)s"
+            log_format = logging.Formatter(format_string)
+
+            if not is_quiet:
+                console_handler = logging.StreamHandler(sys.stdout)
+                console_handler.setFormatter(log_format)
+                logger.addHandler(console_handler)
+
+            file_handler = logging.FileHandler(
+                f"{file_path}/{log_name}.log", mode='a')
+            file_handler.setFormatter(log_format)
+
+            logger.addHandler(file_handler)
+            return logger
+
+        if level is None:
+            level = 'info'
+
+        # validate log level
+        valid_levels = {'debug', 'info', 'warn',
+                        'warning', 'error', 'critical'}
+        if level.lower() not in valid_levels:
+            raise ValueError(
+                f"Invalid log level: {level}. Must be one of {', '.join(valid_levels)}.")
+
+        # get logger instance
+        logger = _get_logger(log_name=log_name, level=level.upper(),
+                             file_path=file_path, is_quiet=is_quiet)
+
+        # Log message
+        if not is_quiet:
+            getattr(logger, level.lower())(message)
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
                           ignore_not_found: bool = False):
@@ -652,47 +761,40 @@ be treated as an object with multiple properties.", level="error")
             self.log(f"write_file: {error}", level="error")
             return False
 
-    def log(self, message: str = '', log_name: str = None, level: str = None,
-            file_path: str = None, is_quiet: bool = False) -> None:
+    def ping(self, is_print: bool = False):
         """
-        Logs a message using the specified log level
-        and writes it to a file if a file path is provided.
-
-        Args:
-            message (str, optional): The message to log. Defaults to ''.
-            log_name (str, optional): The name of the logger to use. Defaults to None.
-            level (str, optional): The log level to use.
-                Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
-                Defaults to 'info'.
-            file_path (str, optional): The path to the log file.
-                If not provided, logs will be saved to settings.json -> path -> log.
-                Defaults to None.
-            is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
-
-        Raises:
-            ValueError: If an invalid log level is provided.
-
-        Returns:
-            None
+        Send a ping to verify successful connection
         """
+        try:
+            self.client.admin.command('ping')
+            self._ifprint("Ping Successful", is_print)
+            return True
+        except Exception as error:  # pylint: disable=W0703
+            print(error)
+            return False
 
-        if level is None:
-            level = 'info'
+    def export(self):
+        """
+        Exports all data to JSON
+        """
+        data = self.database.cabinet.find_one({}, {"_id": 0})
+        json_data = json.dumps(data, indent=4)
 
-        # validate log level
-        valid_levels = {'debug', 'info', 'warn',
-                        'warning', 'error', 'critical'}
-        if level.lower() not in valid_levels:
-            raise ValueError(
-                f"Invalid log level: {level}. Must be one of {', '.join(valid_levels)}.")
+        path_export = '~/.cabinet/export'
+        expanded_path = os.path.expanduser(path_export)
+        directory_path = os.path.abspath(expanded_path)
+        directory_path_with_slash = os.path.join(directory_path, '')
 
-        # get logger instance
-        logger = self._get_logger(log_name=log_name, level=level.upper(),
-                                  file_path=file_path, is_quiet=is_quiet)
+        # Create the directory if it doesn't exist
+        if not os.path.exists(directory_path_with_slash):
+            os.makedirs(directory_path_with_slash)
 
-        # Log message
-        if not is_quiet:
-            getattr(logger, level.lower())(message)
+        current_datetime = datetime.now()
+        formatted_datetime = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
+        file_name = f"cabinet export {formatted_datetime}"
+
+        with open(file_name, 'w', encoding='utf-8') as file:
+            file.write(json_data)
 
 
 def main():
@@ -708,7 +810,7 @@ def main():
     Usage:
         (from the terminal)
         cabinet config
-        cabinet edit <file path/name, optional; default: settings.json>
+        cabinet edit <file path/name, optional; default: edit entire MongoDB>
     """
 
     cab = Cabinet()
@@ -735,20 +837,22 @@ def main():
     parser.add_argument('--configure', '-config', dest='configure',
                         action='store_true', help='Configure')
     parser.add_argument('--edit', '-e', dest='edit', action='store_true',
-                        help='Edit the settings.json file')
+                        help='Edit the entire MongoDB')
     parser.add_argument('--edit-file', '-ef', type=str, dest='edit_file',
                         help='Edit a specific file')
     parser.add_argument('--no-create', dest='create',
                         action='store_false',
                         help='(for -ef) Do not create file if it does not exist')
     parser.add_argument('--get', '-g', dest='get', nargs='+',
-                        help='Get a property from settings.json')
+                        help='Get a property from MongoDB')
     parser.add_argument('--put', '-p', dest='put', nargs='+', action=ValidatePutArgs,
-                        help='Put a property into settings.json')
+                        help='Put a property into MongoDB')
     parser.add_argument('--remove', '-rm', dest='remove',
-                        nargs='+', help='Remove a property from settings.json')
+                        nargs='+', help='Remove a property from MongoDB')
     parser.add_argument('--get-file', dest='get_file',
                         type=str, help='Get file')
+    parser.add_argument('--export', dest='export', action='store_true',
+                        help='Exports MongoDB to ~/.cabinet/export')
     parser.add_argument('--strip', dest='strip', action='store_false',
                         help='(for --get-file) Whether to strip file content whitespace')
     parser.add_argument('--log', '-l', type=str,
@@ -772,14 +876,14 @@ def main():
     args = parser.parse_args()
 
     if args.configure:
-        cab.configure()
+        cab.config()
     elif args.edit:
-        cab.edit()
+        cab.edit_db()
     elif args.edit_file:
         cab.edit_file(file_path=args.edit_file,
                       create_if_not_exist=args.create)
     elif args.get:
-        cab.get(is_print=True, *args.get)
+        cab.get(is_print=True, warn_missing=True, *args.get)
     elif args.put:
         attribute_values = args.put
         cab.put(*attribute_values, is_print=True)
@@ -791,6 +895,8 @@ def main():
                               file_path=None, strip=args.strip)
     elif args.log:
         cab.log(message=args.log, level=args.log_level)
+    elif args.export:
+        cab.export()
     elif args.mail:
         to_addr = None
         if args.to_addr:
