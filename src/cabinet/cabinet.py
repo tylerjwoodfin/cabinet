@@ -263,10 +263,10 @@ class Cabinet:
         If the 'EDITOR' variable is not set, 'vi'
         is used as the default editor.
 
-        If the function is called from a non-terminal environment, 
+        If the function is called from a non-terminal environment,
         such as a graphical user interface,
         the behavior depends on the operating system:
-        - On Windows, the configuration file is opened using 
+        - On Windows, the configuration file is opened using
         the default associated editor for JSON files.
         - On macOS, the configuration file is opened using
         the default application associated with JSON files.
