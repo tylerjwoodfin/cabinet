@@ -22,6 +22,7 @@ import pathlib
 import subprocess
 from datetime import date, datetime
 from typing import Optional
+import pymongo.errors
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from bson import json_util, ObjectId
@@ -33,9 +34,9 @@ from .constants import (
     CONFIG_MONGODB_CLUSTER_NAME,
     CONFIG_MONGODB_DB_NAME,
     CONFIG_PATH_CABINET,
-    ERROR_CONFIG_FILE_NOT_FOUND,
     ERROR_CONFIG_MISSING_VALUES,
-    ERROR_CONFIG_JSON_DECODE
+    ERROR_CONFIG_JSON_DECODE,
+    ERROR_CONFIG_FILE_INVALID
 )
 from .mail import Mail
 
@@ -91,44 +92,51 @@ class Cabinet:
             If the JSON data in the configuration file is not valid,
             the user will be given the option
             to overwrite the file with an empty dictionary or fix the file manually.
-
         """
+
+        def config_prompts(key=None):
+            if key == 'mongodb_username':
+                value = input(CONFIG_MONGODB_USERNAME)
+                self._put_config(key, value)
+            if key == 'mongodb_password':
+                value = getpass.getpass(CONFIG_MONGODB_PASSWORD)
+                self._put_config(key, value)
+            if key == 'mongodb_cluster_name':
+                value = input(CONFIG_MONGODB_CLUSTER_NAME)
+                self._put_config(key, value)
+            if key == 'mongodb_db_name':
+                value = input(CONFIG_MONGODB_DB_NAME)
+                self._put_config(key, value)
+            if key == 'path_cabinet':
+                value = input(CONFIG_PATH_CABINET) \
+                    or f"{pathlib.Path.home().resolve()}/.cabinet"
+                self._put_config(key, value)
+
+            return value
 
         try:
             with open(self.path_config_file, 'r+', encoding="utf8") as file:
                 return json.load(file)[key]
         except FileNotFoundError:
-            if key == 'mongodb_username':
-                # setup
-                self.new_setup = True
-                has_mongodb = input(NEW_SETUP_MSG_INTRO)
+            # setup
+            self.new_setup = True
 
-                value = ''
-                if has_mongodb.lower().startswith('y'):
-                    value = input(CONFIG_MONGODB_USERNAME)
-                else:
-                    input(NEW_SETUP_MSG_MONGODB_INSTRUCTIONS)
-                    value = input(CONFIG_MONGODB_USERNAME)
+            # make .cabinet directory, if needed
+            expanded_path = os.path.expanduser("~/.cabinet")
+            directory_path = os.path.abspath(expanded_path)
+            directory_path_with_slash = os.path.join(directory_path, '')
+            if not os.path.exists(directory_path_with_slash):
+                os.makedirs(directory_path_with_slash)
 
-                self._put_config(key, value)
-                return value
-            else:
-                print(f"{ERROR_CONFIG_FILE_NOT_FOUND}\n")
+            has_mongodb = input(NEW_SETUP_MSG_INTRO)
+
+            if not has_mongodb.lower().startswith('y'):
+                input(NEW_SETUP_MSG_MONGODB_INSTRUCTIONS)
+
+            return config_prompts(key)
         except KeyError:
             if self.new_setup:
-                if key == 'mongodb_password':
-                    value = getpass.getpass(CONFIG_MONGODB_PASSWORD)
-                    self._put_config(key, value)
-                if key == 'mongodb_cluster_name':
-                    value = input(CONFIG_MONGODB_CLUSTER_NAME)
-                    self._put_config(key, value)
-                if key == 'mongodb_db_name':
-                    value = input(CONFIG_MONGODB_DB_NAME)
-                    self._put_config(key, value)
-                if key == 'path_cabinet':
-                    value = input(CONFIG_PATH_CABINET)
-                    self._put_config(key, value)
-                return value
+                return config_prompts(key)
             else:
                 print(
                     f"Warning: Could not find {key} in {self.path_config_file}")
@@ -234,13 +242,21 @@ class Cabinet:
         if any(getattr(self, key) is None or getattr(self, key) == '' for key in keys):
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
+            sys.exit(-1)
 
         self.new_setup = False
-        self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
-                    f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
-                    f"{self.mongodb_db_name}?retryWrites=true&w=majority")
-        self.client = MongoClient(self.uri, server_api=ServerApi('1'))
-        self.database = self.client.cabinet
+
+        try:
+            self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
+                        f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
+                        f"{self.mongodb_db_name}?retryWrites=true&w=majority")
+            self.client = MongoClient(self.uri, server_api=ServerApi('1'))
+            self.database = self.client.cabinet
+        except pymongo.errors.InvalidURI as error:
+            print(ERROR_CONFIG_FILE_INVALID)
+            print(error._message)
+
+            sys.exit(-1)
 
         path_log = self.get('path', 'log') or '~/.cabinet/log'
 

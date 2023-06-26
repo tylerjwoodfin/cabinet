@@ -18,6 +18,13 @@ Supports a cli, email, and event logging.
 - Log to a file/directory of your choice without having to configure `logger` each time
 - Send/receive mail using `cabinet.Cabinet().mail()`
 
+## Dependencies
+
+- Python >= 3.6
+- MongoDB
+- Pymongo (`pip install pymongo`)
+- smtplib
+
 ## Structure
 
 - Data is stored in MongoDB; simply plug in your credentials.
@@ -28,7 +35,7 @@ Supports a cli, email, and event logging.
 
 ```bash
   python3 -m pip install cabinet
-
+  python3 -m pip install pymongo
   cabinet --config
 ```
 
@@ -288,11 +295,6 @@ cab --log "Connection timed out"
 # change levels with --level
 cab --log "Server is on fire" --level "critical"
 ```
-
-## Dependencies
-
-- Python >= 3.6
-- smtplib
 
 ## Disclaimers
 
