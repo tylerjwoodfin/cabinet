@@ -49,11 +49,19 @@ Enter the full path where you would like to store Cabinet data,
 such as logs and settings.
 
 \n
-Default: /home/{pathlib.Path.home().resolve()}/.cabinet
+Default: {pathlib.Path.home().resolve()}/.cabinet
 """
 
-ERROR_CONFIG_FILE_NOT_FOUND = """
-There was a problem with the configuration file.
+ERROR_CONFIG_FILE_INVALID = """
+Cabinet could not initialize properly.
+
+Please check that all values in the configuration file are correct:
+mongodb_username
+mongodb_password
+mongodb_cluster_name
+mongodb_db_name
+path_cabinet
+
 Please try re-running Cabinet.
 
 Otherwise, please leave feedback at https://github.com/tylerjwoodfin/cabinet/issues.\n\n
@@ -62,7 +70,12 @@ Otherwise, please leave feedback at https://github.com/tylerjwoodfin/cabinet/iss
 ERROR_CONFIG_MISSING_VALUES = """
 Cabinet could not initialize properly.
 
-Please check that all values in the configuration file are correct.
+Please check that all values in the configuration file are correct:
+mongodb_username
+mongodb_password
+mongodb_cluster_name
+mongodb_db_name
+path_cabinet
 
 Press Enter to open the file. Update any invalid values and try again.\n
 """
