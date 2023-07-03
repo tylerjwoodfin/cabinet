@@ -506,7 +506,7 @@ class Cabinet:
         if value is None:  # Check if value argument is None
             value = parse_arg(attribute[-1])
 
-        cache = attribute[-1]
+        cache = value
         json_structure = {}
         for item in reversed(attribute[:-1]):
             try:
