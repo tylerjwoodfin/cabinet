@@ -14,14 +14,14 @@ import os
 import ast
 import sys
 import json
-import argparse
 import logging
-import importlib.metadata
 import getpass
 import pathlib
+import argparse
 import subprocess
-from datetime import date, datetime
+import importlib.metadata
 from typing import Optional
+from datetime import date, datetime
 import pymongo.errors
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
@@ -36,7 +36,9 @@ from .constants import (
     CONFIG_PATH_CABINET,
     ERROR_CONFIG_MISSING_VALUES,
     ERROR_CONFIG_JSON_DECODE,
-    ERROR_CONFIG_FILE_INVALID
+    ERROR_CONFIG_FILE_INVALID,
+    ERROR_MONGODB_TIMEOUT,
+    ERROR_MONGODB_DNS
 )
 from .mail import Mail
 
@@ -255,8 +257,16 @@ class Cabinet:
         except pymongo.errors.InvalidURI as error:
             print(ERROR_CONFIG_FILE_INVALID)
             print(error._message)
-
             sys.exit(-1)
+        except pymongo.errors.ServerSelectionTimeoutError as error:
+            print(ERROR_MONGODB_TIMEOUT)
+            print(error)
+            sys.exit(-1)
+        except pymongo.errors.ConfigurationError as error:
+            print(ERROR_MONGODB_DNS)
+            print(error)
+            sys.exit(-1)
+
 
         path_log = self.get('path', 'log') or '~/.cabinet/log'
 

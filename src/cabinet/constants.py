@@ -88,3 +88,11 @@ This will reset your MongoDB credentials, but your data will be safe.
 
 (y/n)\n
 """
+
+ERROR_MONGODB_TIMEOUT = """
+Timeout error: Could not connect to the MongoDB server:
+"""
+
+ERROR_MONGODB_DNS = """
+DNS resolution failed for MongoDB server:
+"""
