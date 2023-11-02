@@ -585,6 +585,10 @@ class Cabinet:
         if is_print:
             print(result)
 
+        # if result contains $HOME or ~, expand it
+        if isinstance(result, str) and ("$HOME" in result or "~" in result):
+            result = result.replace("$HOME", os.environ["HOME"]).replace("~", os.environ["HOME"])
+
         return result
 
     def remove(self, *attribute, is_print: bool = False):
