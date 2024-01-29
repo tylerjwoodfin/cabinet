@@ -52,6 +52,11 @@ such as logs and settings.
 Default: {pathlib.Path.home().resolve()}/.cabinet
 """
 
+EDIT_FILE_DEFAULT = f"""
+"Enter the path of the file you want to edit.
+(default: edit Cabinet's MongoDB collection):\n
+"""
+
 ERROR_CONFIG_FILE_INVALID = """
 Cabinet could not initialize properly.
 
