@@ -243,14 +243,18 @@ class Cabinet:
 
         """
 
-        self.path_cabinet = path_cabinet or \
-            self._expand_aliases(self._get_config('path_cabinet'))
+        if path_cabinet is not None:
+            self.path_cabinet = path_cabinet
+        else:
+            self.path_cabinet = self._expand_aliases(self._get_config('path_cabinet'))
 
         # these should match class attributes above
         keys = ["mongodb_username", "mongodb_password",
                 "mongodb_cluster_name", "mongodb_db_name", "path_cabinet"]
 
         for key in keys:
+            if key == 'path_cabinet' and path_cabinet is not None:
+                continue
             value = self._get_config(key)
             setattr(self, key, value)
 
@@ -607,7 +611,7 @@ class Cabinet:
         for document in cached_data:
             result = document
             for attribute in attributes:
-                if attribute in result:
+                if isinstance(result, dict) and attribute in result:
                     result = result[attribute]
                 else:
                     if warn_missing:
