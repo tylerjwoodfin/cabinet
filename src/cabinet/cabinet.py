@@ -35,6 +35,7 @@ from .constants import (
     CONFIG_MONGODB_CLUSTER_NAME,
     CONFIG_MONGODB_DB_NAME,
     CONFIG_PATH_CABINET,
+    EDIT_FILE_DEFAULT,
     ERROR_CONFIG_MISSING_VALUES,
     ERROR_CONFIG_JSON_DECODE,
     ERROR_CONFIG_FILE_INVALID,
@@ -125,11 +126,10 @@ class Cabinet:
             self.new_setup = True
 
             # make .cabinet directory, if needed
-            expanded_path = os.path.expanduser("~/.cabinet")
-            directory_path = os.path.abspath(expanded_path)
-            directory_path_with_slash = os.path.join(directory_path, '')
-            if not os.path.exists(directory_path_with_slash):
-                os.makedirs(directory_path_with_slash)
+            path_cabinet = self._expand_aliases("~/.cabinet")
+            path_cabinet_slash = os.path.join(path_cabinet, '')
+            if not os.path.exists(path_cabinet_slash):
+                os.makedirs(path_cabinet_slash)
 
             has_mongodb = input(NEW_SETUP_MSG_INTRO)
 
@@ -214,6 +214,18 @@ class Cabinet:
             if is_print:
                 print(message)
             return message
+        
+    def _expand_aliases(self, string):
+        """
+        Expands environment variables and user aliases in a string.
+
+        Args:
+            - string (str): the string to expand
+
+        Returns:
+            - The expanded string.
+        """
+        return string.replace("$HOME", os.environ.get("HOME", "")).replace("~", os.environ.get("HOME", ""))
 
     def __init__(self, path_cabinet: str = None):
         """
@@ -231,8 +243,8 @@ class Cabinet:
 
         """
 
-        self.path_cabinet = path_cabinet or os.path.expanduser(
-            self._get_config('path_cabinet'))
+        self.path_cabinet = path_cabinet or \
+            self._expand_aliases(self._get_config('path_cabinet'))
 
         # these should match class attributes above
         keys = ["mongodb_username", "mongodb_password",
@@ -269,17 +281,14 @@ class Cabinet:
             sys.exit(-1)
 
 
-        path_log = self.get('path', 'log') or '~/.cabinet/log'
-
-        expanded_path = os.path.expanduser(path_log)
-        directory_path = os.path.abspath(expanded_path)
-        directory_path_with_slash = os.path.join(directory_path, '')
+        path_log = self._expand_aliases(self.get('path', 'log') or '~/.cabinet/log')
+        path_log_slash = os.path.join(path_log, '')
 
         # Create the directory if it doesn't exist
-        if not os.path.exists(directory_path_with_slash):
-            os.makedirs(directory_path_with_slash)
+        if not os.path.exists(path_log_slash):
+            os.makedirs(path_log_slash)
 
-        self.path_log = directory_path_with_slash
+        self.path_log = path_log_slash
 
     def config(self):
         """
@@ -428,10 +437,7 @@ class Cabinet:
 
         # edit MongoDB Directly if no file_path
         if file_path is None:
-            path = input(
-                "Enter the path of the file you want to edit "
-                "(default: edit Cabinet's MongoDB collection):\n"
-            )
+            path = input(EDIT_FILE_DEFAULT)
 
             if path == "":
                 self.edit_db()
@@ -565,7 +571,7 @@ class Cabinet:
             - *attributes (str): a sequence of strings representing nested attributes
             - warn_missing (bool, optional): whether to warn if an attribute is missing
             - is_print (bool, optional): whether to print the return value
-            - no_cache (bool, optional): whether to force a fresh DynamoDB call
+            - no_cache (bool, optional): whether to force a fresh MongoDB call
                 - by default, if cache is over 1 hour old, update will be called and cache will be updated
 
         Returns:
@@ -576,7 +582,7 @@ class Cabinet:
         """
 
         cache_file_path = "cache.json"
-        cache_update_needed = no_cache or False
+        cache_update_needed = no_cache
 
         # Check if cache file exists and is less than 1 hour old
         if os.path.exists(cache_file_path):
@@ -590,10 +596,14 @@ class Cabinet:
             self.update_cache()  # Update the cache file
 
         # Read from cache
-        with open(cache_file_path, "r", encoding="utf-8") as file:
-            cached_data = json.load(file)
+        try:
+            with open(cache_file_path, "r", encoding="utf-8") as file:
+                cached_data = json.load(file)
+        except FileNotFoundError:
+            self.log("Cache file not found", level="warn")
+            return None
 
-        # Assuming cached_data is a list of documents
+        # Process the cached data
         for document in cached_data:
             result = document
             for attribute in attributes:
@@ -603,6 +613,9 @@ class Cabinet:
                     if warn_missing:
                         self.log(f"Attribute '{attribute}' is missing", level="warn")
                     return None
+
+            if isinstance(result, str):
+                result = self._expand_aliases(result)
 
             if is_print:
                 print(result)
@@ -819,14 +832,12 @@ class Cabinet:
         """
         cache = self.update_cache()
 
-        path_export = '~/.cabinet/export'
-        expanded_path = os.path.expanduser(path_export)
-        directory_path = os.path.abspath(expanded_path)
-        directory_path_with_slash = os.path.join(directory_path, '')
+        path_export = self._expand_aliases('~/.cabinet/export')
+        path_export_slash = os.path.join(path_export, '')
 
         # Create the directory if it doesn't exist
-        if not os.path.exists(directory_path_with_slash):
-            os.makedirs(directory_path_with_slash)
+        if not os.path.exists(path_export_slash):
+            os.makedirs(path_export_slash)
 
         current_datetime = datetime.now()
         formatted_datetime = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
@@ -879,6 +890,8 @@ def main():
                         help='Edit the entire MongoDB')
     parser.add_argument('--edit-file', '-ef', type=str, dest='edit_file',
                         help='Edit a specific file')
+    parser.add_argument('--no-cache', dest='no_cache', action='store_true',
+                    help='Disable using the cache for MongoDB queries')
     parser.add_argument('--no-create', dest='create',
                         action='store_false',
                         help='(for -ef) Do not create file if it does not exist')
@@ -922,7 +935,7 @@ def main():
         cab.edit_file(file_path=args.edit_file,
                       create_if_not_exist=args.create)
     elif args.get:
-        cab.get(is_print=True, warn_missing=True, *args.get)
+        cab.get(is_print=True, warn_missing=True, no_cache=args.no_cache, *args.get)
     elif args.put:
         attribute_values = args.put
         cab.put(*attribute_values, is_print=True)

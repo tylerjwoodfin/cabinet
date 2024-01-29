@@ -28,6 +28,8 @@ Supports a cli, email, and event logging.
 ## Structure
 
 - Data is stored in MongoDB; simply plug in your credentials.
+  - cache is written when retrieving data.
+  - if cache is older than 1 hour, it is refreshed; otherwise, data is pulled from cache by default
 - Logs are written to `~/.cabinet/log/LOG_DAILY_YYYY-MM-DD` by default
   - this can be changed as needed (per log or otherwise)
 
@@ -170,12 +172,15 @@ from cabinet import Cabinet
 cab = Cabinet()
 
 print(cab.get("employee", "Tyler", "salary"))
+
+# or cab.get("employee", "Tyler", "salary", is_print = True)
 ```
 
 or terminal:
 ```
 cabinet -g employee Tyler salary
 ```
+- optional: `--no-cache` to force cache refresh
 
 results in:
 ```
