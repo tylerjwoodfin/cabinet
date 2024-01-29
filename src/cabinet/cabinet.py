@@ -14,6 +14,7 @@ import os
 import ast
 import sys
 import json
+import time
 import logging
 import getpass
 import pathlib
@@ -337,31 +338,45 @@ class Cabinet:
                 subprocess.run(['xdg-open', self.path_config_file], check=True)
             else:
                 print(f"Please edit ${self.path_config_file} to configure.")
+                
+    def update_cache(self):
+        """
+        Writes all MongoDB data to a cache file for faster reads in most situations
+        """
+        
+        print("Updating cache...")
+        collection_data = self.database.cabinet.find()
+        json_data = json.dumps(list(collection_data), indent=4, default=json_util.default)
+
+        temp_file_path = "cache.json"
+        
+        try:
+            # Write the JSON data to cache
+            with open(temp_file_path, "w", encoding="utf-8") as temp_file:
+                temp_file.write(json_data)
+        except Exception as e:
+            self.log(f"Error updating cache: {e}", level="error")
+            return None  # Or handle the error as appropriate
+
+        return json_data
 
     def edit_db(self):
         """
         Opens the data in self.database.cabinet within a JSON file in Vim.
         When the file is closed, it replaces the data in this collection in MongoDB.
         """
-
-        # Export the data from the collection to a JSON file
-        collection_data = self.database.cabinet.find()
-        json_data = json.dumps(list(collection_data),
-                               indent=4, default=json_util.default)
-
-        temp_file_path = "temp_mongodb_cabinet.json"
+        
+        json_data = self.update_cache()
+        path_cache = "cache.json"
 
         try:
-            # Write the JSON data to a temporary file
-            with open(temp_file_path, "w", encoding="utf-8") as temp_file:
-                temp_file.write(json_data)
 
-            # Open the temporary file in Vim
-            subprocess.run(["vim", temp_file_path], check=True)
+            # Open the cache file in Vim
+            subprocess.run(["vim", path_cache], check=True)
 
-            # Read the modified JSON data from the temporary file
-            with open(temp_file_path, "r", encoding="utf-8") as temp_file:
-                modified_json_data = temp_file.read()
+            # Read the modified JSON data from the cache
+            with open(path_cache, "r", encoding="utf-8") as file_cache:
+                modified_json_data = file_cache.read()
 
             # Check if any changes were made
             if modified_json_data == json_data:
@@ -388,11 +403,6 @@ class Cabinet:
             print("Error: Failed to parse the modified JSON data.")
         except Exception as error:  # pylint: disable=W0703
             print(f"Error: {str(error)}")
-
-        finally:
-            # Remove the temporary file
-            subprocess.run(["rm", temp_file_path], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def edit_file(self, file_path: str = None, create_if_not_exist: bool = True) -> None:
         """
@@ -546,50 +556,62 @@ class Cabinet:
 
         return value
 
-    def get(self, *attributes, warn_missing=False, is_print=False):
+    def get(self, *attributes, warn_missing=False, is_print=False, no_cache=False):
         """
-        Returns a property from MongoDB based on the input attributes.
+        Returns a property or properties from MongoDB based on the input attributes,
+        using a cache file to improve performance.
 
         Args:
-            - attributes (str): the attributes check in MongoDB
+            - *attributes (str): a sequence of strings representing nested attributes
             - warn_missing (bool, optional): whether to warn if an attribute is missing
             - is_print (bool, optional): whether to print the return value
+            - no_cache (bool, optional): whether to force a fresh DynamoDB call
+                - by default, if cache is over 1 hour old, update will be called and cache will be updated
 
         Returns:
-            - The value of the attribute if it exists in MongoDB, otherwise default.
+            - The value of the attribute if it exists in the cache or MongoDB, otherwise None.
 
         Usage:
-            - get('person', 'tyler', 'salary') returns person -> tyler -> salary from self.db
+            - get('person', 'tyler', 'salary') returns the value of person -> tyler -> salary
         """
 
-        collection = self.database.cabinet
+        cache_file_path = "cache.json"
+        cache_update_needed = no_cache or False
 
-        document = collection.find_one(
-            {}, {attribute: 1 for attribute in attributes})
+        # Check if cache file exists and is less than 1 hour old
+        if os.path.exists(cache_file_path):
+            last_modified = os.path.getmtime(cache_file_path)
+            if (time.time() - last_modified) / 3600 > 1:  # Cache older than 1 hour
+                cache_update_needed = True
+        else:
+            cache_update_needed = True
 
-        if document:
+        if cache_update_needed:
+            self.update_cache()  # Update the cache file
+
+        # Read from cache
+        with open(cache_file_path, "r", encoding="utf-8") as file:
+            cached_data = json.load(file)
+
+        # Assuming cached_data is a list of documents
+        for document in cached_data:
             result = document
             for attribute in attributes:
                 if attribute in result:
                     result = result[attribute]
                 else:
                     if warn_missing:
-                        self.log(
-                            f"Attribute '{attribute}' is missing", level="warn")
+                        self.log(f"Attribute '{attribute}' is missing", level="warn")
                     return None
-        else:
-            if warn_missing:
-                self.log("No document found in MongoDB", level="warn")
-            return None
 
-        if is_print:
-            print(result)
+            if is_print:
+                print(result)
 
-        # if result contains $HOME or ~, expand it
-        if isinstance(result, str) and ("$HOME" in result or "~" in result):
-            result = result.replace("$HOME", os.environ["HOME"]).replace("~", os.environ["HOME"])
+            return result
 
-        return result
+        if warn_missing:
+            self.log("No document found in cache or MongoDB", level="warn")
+        return None
 
     def remove(self, *attribute, is_print: bool = False):
         """
@@ -791,24 +813,11 @@ class Cabinet:
             self.log(f"write_file: {error}", level="error")
             return False
 
-    def ping(self, is_print: bool = False):
-        """
-        Send a ping to verify successful connection
-        """
-        try:
-            self.client.admin.command('ping')
-            self._ifprint("Ping Successful", is_print)
-            return True
-        except Exception as error:  # pylint: disable=W0703
-            print(error)
-            return False
-
     def export(self):
         """
-        Exports all data to JSON
+        Exports all data in MongoDB to JSON
         """
-        data = self.database.cabinet.find_one({}, {"_id": 0})
-        json_data = json.dumps(data, indent=4)
+        cache = self.update_cache()
 
         path_export = '~/.cabinet/export'
         expanded_path = os.path.expanduser(path_export)
@@ -824,7 +833,7 @@ class Cabinet:
         file_name = f"cabinet export {formatted_datetime}"
 
         with open(file_name, 'w', encoding='utf-8') as file:
-            file.write(json_data)
+            file.write(cache)
 
 
 def main():

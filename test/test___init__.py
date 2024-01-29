@@ -45,7 +45,7 @@ def test_cabinet_initialization_with_custom_path_cabinet():
     """
     tests custom path
     """
-    custom_path_cabinet = '~/pytest/path/to/custom/cabinet'
+    custom_path_cabinet = '/home/tyler/pytest/path/to/custom/cabinet'
     cab = Cabinet(path_cabinet=custom_path_cabinet)
     assert cab.path_cabinet == custom_path_cabinet
     # assert str(
