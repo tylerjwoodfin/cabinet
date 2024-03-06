@@ -357,7 +357,6 @@ class Cabinet:
         Writes all MongoDB data to a cache file for faster reads in most situations
         """
         
-        print("Updating cache...")
         collection_data = self.database.cabinet.find()
         json_data = json.dumps(list(collection_data), indent=4, default=json_util.default)
 
