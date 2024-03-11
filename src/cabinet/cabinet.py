@@ -58,8 +58,9 @@ class Cabinet:
     client: MongoClient = None
     database = None
     new_setup: bool = False
-    path_config_file = str(pathlib.Path(
-        __file__).resolve().parent / "cabinet_config.json")
+    path_config_dir = str(pathlib.Path(
+        __file__).resolve().parent)
+    path_config_file = f"{path_config_dir}/cabinet_config.json"
     path_cabinet: str = None
     path_log: str = None
 
@@ -352,23 +353,28 @@ class Cabinet:
             else:
                 print(f"Please edit ${self.path_config_file} to configure.")
                 
-    def update_cache(self):
+    def update_cache(self, path: str = None):
         """
-        Writes all MongoDB data to a cache file for faster reads in most situations
+        Writes all MongoDB data to a cache file for faster reads in most situations. Creates the cache file if it does not exist.
+        
+        Args:
+            - path (str): full path, including filename, of cache.json
         """
+        
+        if path == None:
+            path = f"{self.path_config_dir}/cache.json"
         
         collection_data = self.database.cabinet.find()
         json_data = json.dumps(list(collection_data), indent=4, default=json_util.default)
-
-        temp_file_path = "cache.json"
         
         try:
-            # Write the JSON data to cache
-            with open(temp_file_path, "w", encoding="utf-8") as temp_file:
+            # Ensure the directory exists and write the JSON data to cache
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as temp_file:
                 temp_file.write(json_data)
         except Exception as e:
             self.log(f"Error updating cache: {e}", level="error")
-            return None  # Or handle the error as appropriate
+            return None
 
         return json_data
 
@@ -378,16 +384,16 @@ class Cabinet:
         When the file is closed, it replaces the data in this collection in MongoDB.
         """
         
-        json_data = self.update_cache()
-        path_cache = "cache.json"
+        path_cache_file = f"{self.path_config_dir}/cache.json"
+        json_data = self.update_cache(path_cache_file)
 
         try:
 
             # Open the cache file in Vim
-            subprocess.run(["vim", path_cache], check=True)
+            subprocess.run(["vim", path_cache_file], check=True)
 
             # Read the modified JSON data from the cache
-            with open(path_cache, "r", encoding="utf-8") as file_cache:
+            with open(path_cache_file, "r", encoding="utf-8") as file_cache:
                 modified_json_data = file_cache.read()
 
             # Check if any changes were made
@@ -584,13 +590,13 @@ class Cabinet:
             - get('person', 'tyler', 'salary') returns the value of person -> tyler -> salary
         """
 
-        cache_file_path = "cache.json"
+        path_cache_file = f"{self.path_config_dir}/cache.json"
         cache_update_needed = no_cache
 
         # Check if cache file exists and is less than 1 hour old
-        if os.path.exists(cache_file_path):
-            last_modified = os.path.getmtime(cache_file_path)
-            if (time.time() - last_modified) / 3600 > 1:  # Cache older than 1 hour
+        if os.path.exists(path_cache_file):
+            last_modified = os.path.getmtime(path_cache_file)
+            if (time.time() - last_modified) / 3600 > 1:
                 cache_update_needed = True
         else:
             cache_update_needed = True
@@ -600,10 +606,10 @@ class Cabinet:
 
         # Read from cache
         try:
-            with open(cache_file_path, "r", encoding="utf-8") as file:
+            with open(path_cache_file, "r", encoding="utf-8") as file:
                 cached_data = json.load(file)
         except FileNotFoundError:
-            self.log("Cache file not found", level="warn")
+            self.log(f"Cache file not found at {path_cache_file}", level="warn")
             return None
 
         # Process the cached data
