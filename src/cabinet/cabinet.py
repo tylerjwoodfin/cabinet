@@ -215,7 +215,7 @@ class Cabinet:
             if is_print:
                 print(message)
             return message
-        
+
     def _expand_aliases(self, string):
         """
         Expands environment variables and user aliases in a string.
@@ -226,7 +226,8 @@ class Cabinet:
         Returns:
             - The expanded string.
         """
-        return string.replace("$HOME", os.environ.get("HOME", "")).replace("~", os.environ.get("HOME", ""))
+        return string.replace("$HOME", os.environ.get("HOME",
+            "")).replace("~", os.environ.get("HOME", ""))
 
     def __init__(self, path_cabinet: str = None):
         """
@@ -352,27 +353,28 @@ class Cabinet:
                 subprocess.run(['xdg-open', self.path_config_file], check=True)
             else:
                 print(f"Please edit ${self.path_config_file} to configure.")
-                
+
     def update_cache(self, path: str = None):
         """
-        Writes all MongoDB data to a cache file for faster reads in most situations. Creates the cache file if it does not exist.
+        Writes all MongoDB data to a cache file for faster reads in most situations.
+        Creates the cache file if it does not exist.
         
         Args:
             - path (str): full path, including filename, of cache.json
         """
-        
-        if path == None:
+
+        if path is None:
             path = f"{self.path_config_dir}/cache.json"
-        
+
         collection_data = self.database.cabinet.find()
         json_data = json.dumps(list(collection_data), indent=4, default=json_util.default)
-        
+
         try:
             # Ensure the directory exists and write the JSON data to cache
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as temp_file:
                 temp_file.write(json_data)
-        except Exception as e:
+        except OSError as e:
             self.log(f"Error updating cache: {e}", level="error")
             return None
 
@@ -383,7 +385,7 @@ class Cabinet:
         Opens the data in self.database.cabinet within a JSON file in Vim.
         When the file is closed, it replaces the data in this collection in MongoDB.
         """
-        
+
         path_cache_file = f"{self.path_config_dir}/cache.json"
         json_data = self.update_cache(path_cache_file)
 
@@ -581,7 +583,8 @@ class Cabinet:
             - warn_missing (bool, optional): whether to warn if an attribute is missing
             - is_print (bool, optional): whether to print the return value
             - no_cache (bool, optional): whether to force a fresh MongoDB call
-                - by default, if cache is over 1 hour old, update will be called and cache will be updated
+                - by default, if cache is over 1 hour old,
+                    update will be called and cache will be updated
 
         Returns:
             - The value of the attribute if it exists in the cache or MongoDB, otherwise None.
