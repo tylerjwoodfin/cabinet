@@ -668,7 +668,7 @@ class Cabinet:
             print(f"{' -> '.join(attribute)} removed\n")
 
     def log(self, message: str = '', log_name: str = None, level: str = None,
-            file_path: str = None, is_quiet: bool = False) -> None:
+            log_folder_path: str = None, is_quiet: bool = False) -> None:
         """
         Logs a message using the specified log level
         and writes it to a file if a file path is provided.
@@ -679,7 +679,7 @@ class Cabinet:
             level (str, optional): The log level to use.
                 Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
                 Defaults to 'info'.
-            file_path (str, optional): The path to the log file.
+            log_folder_path (str, optional): The path to the log file.
                 If not provided, logs will be saved to MongoDB -> path -> log.
                 Defaults to None.
             is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
@@ -692,7 +692,7 @@ class Cabinet:
         """
 
         def _get_logger(log_name: str = None, level: int = logging.INFO,
-                file_path: str = None, is_quiet: bool = False) -> logging.Logger:
+                        log_folder_path: str = None, is_quiet: bool = False) -> logging.Logger:
             """
             Returns a customized logger object with the specified name and level,
             and optionally logs to a file.
@@ -700,7 +700,7 @@ class Cabinet:
             Args:
             - log_name (str): the name of the logger (defaults to 'root')
             - level (int): the logging level to use (defaults to logging.INFO)
-            - file_path (str): the path to a file to log to
+            - log_folder_path (str): the path to a file to log to
                 (defaults to None, meaning log only to console)
             - is_quiet (bool): if True, only logs to file and not to console (defaults to False)
 
@@ -710,15 +710,18 @@ class Cabinet:
 
             today = str(date.today())
 
-            if file_path is None:
-                file_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
+            if log_folder_path is None:
+                log_folder_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
+            else:
+                log_folder_path = os.path.expanduser(log_folder_path)
+
             if log_name is None:
                 log_name = f"LOG_DAILY_{today}"
 
             # create path if necessary
-            if not os.path.exists(file_path):
-                self._ifprint(f"Creating {file_path}", self.new_setup is True)
-                os.makedirs(file_path)
+            if not os.path.exists(log_folder_path):
+                self._ifprint(f"Creating {log_folder_path}", self.new_setup is True)
+                os.makedirs(log_folder_path)
 
             logger = logging.getLogger(log_name)
 
@@ -737,7 +740,7 @@ class Cabinet:
                 logger.addHandler(console_handler)
 
             file_handler = logging.FileHandler(
-                f"{file_path}/{log_name}.log", mode='a')
+                os.path.join(log_folder_path, f"{log_name}.log"), mode='a')
             file_handler.setFormatter(log_format)
 
             logger.addHandler(file_handler)
@@ -755,19 +758,19 @@ class Cabinet:
 
         # get logger instance
         logger = _get_logger(log_name=log_name, level=level.upper(),
-                             file_path=file_path, is_quiet=is_quiet)
+                             log_folder_path=log_folder_path, is_quiet=is_quiet)
 
         # log message
         getattr(logger, level.lower())(message)
 
-    def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
+    def get_file_as_array(self, file_name: str, file_path=None, strip: bool = True,
                           ignore_not_found: bool = False):
         """
         Reads a file and returns its contents as a list of lines.
         The file is assumed to be encoded in UTF-8.
 
         Args:
-            - item (str): The filename to read.
+            - file_name (str): The filename to read.
             - file_path (str, optional): The path to the directory containing the file.
                 If None, the default path is used.
             - strip (bool, optional): Whether to strip the lines of whitespace characters
@@ -788,7 +791,7 @@ class Cabinet:
             file_path += '/'
 
         try:
-            content = open(file_path + item, "r", encoding="utf8").read()
+            content = open(file_path + file_name, "r", encoding="utf8").read()
 
             if strip:
                 content = content.strip()
@@ -953,7 +956,7 @@ def main():
         attribute_values = args.remove
         cab.remove(*attribute_values, is_print=True)
     elif args.get_file:
-        cab.get_file_as_array(item=args.get_file,
+        cab.get_file_as_array(file_name=args.get_file,
                               file_path=None, strip=args.strip)
     elif args.log:
         cab.log(message=args.log, level=args.log_level)

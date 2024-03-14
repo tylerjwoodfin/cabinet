@@ -270,19 +270,16 @@ from cabinet import Cabinet
 cab = Cabinet()
 
 # writes to a file named LOG_DAILY_YYYY-MM-DD in the default log folder (or cab.get('path', 'log')) inside a YYYY-MM-DD folder
-
 cab.log("Connection timed out") # defaults to 'info' if no level is set
 cab.log("This function hit a breakpoint", level="debug")
 cab.log("Looks like the server is on fire", level="critical")
 cab.log("This is fine", level="info")
 
 # writes to a file named LOG_TEMPERATURE
-
 cab.log("30", log_name="LOG_TEMPERATURE")
 
 # writes to a file named LOG_TEMPERATURE in /home/{username}/weather
-
-cab.log("30", log_name="LOG_TEMPERATURE", file_path="/home/{username}/weather")
+cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="/home/{username}/weather")
 
     # format
     # 2021-12-29 19:29:27,896 — INFO — 30
