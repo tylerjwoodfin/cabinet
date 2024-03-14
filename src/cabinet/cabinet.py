@@ -692,10 +692,8 @@ class Cabinet:
         """
 
         def _get_logger(log_name: str = None, level: int = logging.INFO,
-                        file_path: str = None, is_quiet: bool = False) -> logging.Logger:
+                file_path: str = None, is_quiet: bool = False) -> logging.Logger:
             """
-            A helper function for log()
-
             Returns a customized logger object with the specified name and level,
             and optionally logs to a file.
 
@@ -732,6 +730,7 @@ class Cabinet:
             format_string = "%(asctime)s — %(levelname)s — %(message)s"
             log_format = logging.Formatter(format_string)
 
+            # only add console handler if not is_quiet
             if not is_quiet:
                 console_handler = logging.StreamHandler(sys.stdout)
                 console_handler.setFormatter(log_format)
@@ -758,9 +757,8 @@ class Cabinet:
         logger = _get_logger(log_name=log_name, level=level.upper(),
                              file_path=file_path, is_quiet=is_quiet)
 
-        # Log message
-        if not is_quiet:
-            getattr(logger, level.lower())(message)
+        # log message
+        getattr(logger, level.lower())(message)
 
     def get_file_as_array(self, item: str, file_path=None, strip: bool = True,
                           ignore_not_found: bool = False):
