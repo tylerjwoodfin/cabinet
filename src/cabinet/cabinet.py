@@ -416,11 +416,13 @@ class Cabinet:
             print("Data in the collection has been updated.")
 
         except FileNotFoundError:
-            print("Error: Temporary file not found.")
+            print("Error: Cache file not found.")
         except subprocess.CalledProcessError:
             print("Error: Failed to open the file in Vim.")
         except json.JSONDecodeError:
             print("Error: Failed to parse the modified JSON data.")
+            print("Refreshing cache with original data.")
+            self.write_file('cache.json', self.path_config_dir, json_data)
         except Exception as error:  # pylint: disable=W0703
             print(f"Error: {str(error)}")
 
@@ -614,6 +616,17 @@ class Cabinet:
         except FileNotFoundError:
             self.log(f"Cache file not found at {path_cache_file}", level="warn")
             return None
+        except json.decoder.JSONDecodeError:
+            self.log(f"Could not read Cabinet cache at {path_cache_file}. Clearing.",
+                     level="warn")
+            try:
+                os.remove(path_cache_file)
+                print(f"File removed successfully: {path_cache_file}")
+                print("Please retry your last command.")
+                sys.exit(0)
+            except PermissionError:
+                self.log(f"Permission denied: Unable to delete the file at {path_cache_file}",
+                         level="critical")
 
         # Process the cached data
         for document in cached_data:
