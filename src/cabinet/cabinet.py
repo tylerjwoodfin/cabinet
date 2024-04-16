@@ -55,14 +55,14 @@ class Cabinet:
     mongodb_cluster_name: str = ''
     mongodb_db_name: str = ''
     mongodb_uri = ""
-    client: MongoClient = None
+    client: MongoClient | None = None
     database = None
     new_setup: bool = False
     path_config_dir = str(pathlib.Path(
         __file__).resolve().parent)
     path_config_file = f"{path_config_dir}/cabinet_config.json"
-    path_cabinet: str = None
-    path_log: str = None
+    path_cabinet: str | None = None
+    path_log: str | None = None
 
     def _get_config(self, key=None):
         """
@@ -158,7 +158,7 @@ class Cabinet:
 
             sys.exit(-1)
 
-    def _put_config(self, key: str = None, value: str = None):
+    def _put_config(self, key: str | None = None, value: str | None = None) -> str | None:
         """
         Updates the internal configuration file with a new key-value pair.
 
@@ -229,7 +229,7 @@ class Cabinet:
         return string.replace("$HOME", os.environ.get("HOME",
             "")).replace("~", os.environ.get("HOME", ""))
 
-    def __init__(self, path_cabinet: str = None):
+    def __init__(self, path_cabinet: str | None = None):
         """
         Initializes the Cabinet instance with the provided or default configuration.
 
@@ -354,7 +354,7 @@ class Cabinet:
             else:
                 print(f"Please edit ${self.path_config_file} to configure.")
 
-    def update_cache(self, path: str = None):
+    def update_cache(self, path: str | None = None) -> str | None:
         """
         Writes all MongoDB data to a cache file for faster reads in most situations.
         Creates the cache file if it does not exist.
@@ -420,13 +420,13 @@ class Cabinet:
         except subprocess.CalledProcessError:
             print("Error: Failed to open the file in Vim.")
         except json.JSONDecodeError:
-            print("Error: Failed to parse the modified JSON data.")
-            print("Refreshing cache with original data.")
+            self.log("Failed to parse the modified JSON data.", level="error")
+            self.log("Refreshing cache with original data.", level="info")
             self.write_file('cache.json', self.path_config_dir, json_data)
         except Exception as error:  # pylint: disable=W0703
             print(f"Error: {str(error)}")
 
-    def edit_file(self, file_path: str = None, create_if_not_exist: bool = True) -> None:
+    def edit_file(self, file_path: str | None = None, create_if_not_exist: bool = True) -> None:
         """
         Edit and save a file in Vim.
 
@@ -467,6 +467,10 @@ class Cabinet:
                     in getItem(path -> edit); should be a JSON object with value", level="warn")
             else:
                 file_path = item["value"]
+
+        if not file_path:
+            print("Error: No file_path")
+            return
 
         if not os.path.exists(file_path):
             if create_if_not_exist:
@@ -680,8 +684,8 @@ class Cabinet:
             print(f"Modified {result.modified_count} item(s)")
             print(f"{' -> '.join(attribute)} removed\n")
 
-    def log(self, message: str = '', log_name: str = None, level: str = None,
-            log_folder_path: str = None, is_quiet: bool = False) -> None:
+    def log(self, message: str = '', log_name: str | None = None, level: str | None = None,
+            log_folder_path: str | None = None, is_quiet: bool = False) -> None:
         """
         Logs a message using the specified log level
         and writes it to a file if a file path is provided.
@@ -704,8 +708,10 @@ class Cabinet:
             None
         """
 
-        def _get_logger(log_name: str = None, level: int = logging.INFO,
-                        log_folder_path: str = None, is_quiet: bool = False) -> logging.Logger:
+        def _get_logger(log_name: str | None = None,
+                        level: int = logging.INFO,
+                        log_folder_path: str | None = None,
+                        is_quiet: bool = False) -> logging.Logger:
             """
             Returns a customized logger object with the specified name and level,
             and optionally logs to a file.
@@ -722,6 +728,9 @@ class Cabinet:
             """
 
             today = str(date.today())
+
+            if not self.path_cabinet:
+                raise ValueError("_get_logger: self.path_cabinet not available")
 
             if log_folder_path is None:
                 log_folder_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
@@ -900,8 +909,8 @@ def main():
         """
 
         def __call__(self, parser, namespace, values, option_string=None):
-            if len(values) < 2:
-                if len(values) == 1 and values[0] == 'ut':
+            if not values or len(values) < 2:
+                if values and len(values) == 1 and values[0] == 'ut':
                     print("I think you meant to use '--put' or '-p'.\n")
                 parser.error(
                     f"At least 2 arguments are required for {option_string}")
