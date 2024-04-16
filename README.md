@@ -118,7 +118,7 @@ file:
     "email": {
         "from": "throwaway@example.com",
         "from_pw": "example",
-        "from_name": "Raspberry Pi",
+        "from_name": "Cabinet",
         "to": "destination@protonmail.com",
         "smtp_server": "example.com",
         "imap_server": "example.com",
