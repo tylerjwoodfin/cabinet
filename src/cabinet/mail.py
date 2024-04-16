@@ -8,7 +8,6 @@ A throwaway email is highly recommended.
 """
 
 import smtplib
-from typing import List
 from urllib.parse import unquote
 import sys
 import pwd
@@ -29,14 +28,21 @@ class Mail:
         self.cab = cabinet.Cabinet()
 
         # parameters
+        # port should be int; TODO update Cabinet to support type casting
         self.port = self.cab.get("email", "port")
-        self.smtp_server = self.cab.get("email", "smtp_server")
-        self.imap_server = self.cab.get("email", "imap_server")
+
+        self.smtp_server: str | None = self.cab.get("email", "smtp_server")
+        self.imap_server: str | None = self.cab.get("email", "imap_server")
         self.username = self.cab.get("email", "from")
         self.password = self.cab.get("email", "from_pw")
 
-    def send(self, subject: str, body: str, signature: str = '', to_addr: List[str] = None,
-             from_name: str = None, logging_enabled: bool = True, is_quiet: bool = False) -> None:
+    def send(self, subject: str,
+             body: str,
+             signature: str = '',
+             to_addr = None, # should be List[str]; TODO update Cabinet to support type casting
+             from_name: str | None = None,
+             logging_enabled: bool = True,
+             is_quiet: bool = False) -> None:
         """
         Sends an email with the given subject and body to the specified recipients.
 
@@ -83,10 +89,26 @@ class Mail:
         message["To"] = (', ').join(to_addr)
         message.attach(MIMEText(unquote(body), "html"))
 
+        if not self.smtp_server:
+            self.cab.log("No SMTP Server set", level="error")
+            return
+
+        if not self.port:
+            self.cab.log("No port set", level="error")
+            return
+
+        if not isinstance(self.port, int):
+            self.cab.log(f"Port is not an integer (received '{self.port}')", level="error")
+            return
+
         # Send the email.
         server = smtplib.SMTP_SSL(self.smtp_server, self.port)
 
         try:
+
+            if not self.username or not self.password:
+                self.cab.log("Username/password not set", level="error")
+                return
             server.login(self.username, self.password)
 
             server.send_message(message)
