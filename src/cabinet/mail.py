@@ -52,8 +52,8 @@ class Mail:
         - signature (str): The signature to include at the end of the email.
         - to_addr (List): A list of email addresses to send the email to.
         - from_name (str, optional): The name to appear in the "From" field of the email.
-            Reads from settings.json -> email -> from_name if unset.
-            If this is unset, defaults to `Raspberry Pi`
+            Reads from cabinet -> email -> from_name if unset.
+            If this is unset, defaults to os.getenv("HOSTNAME") or `Cabinet`
         - logging_enabled (bool, optional): Whether to log the email send event.
             Defaults to True.
         - is_quiet: Whether to suppress log output.
@@ -65,10 +65,25 @@ class Mail:
         Gmail will almost certainly not work.
         """
 
+        hostname = os.getenv("HOSTNAME")
+        if hostname:
+            hostname = hostname.capitalize()
+
+        cab_from_name = self.cab.get("email", "from_name") or hostname or "Cabinet"
+
+        # send IP if reminder came directly from outside of server
+        client_name = os.getenv('SSH_CONNECTION')
+
+        if client_name:
+            client_name = client_name.strip().replace('\n', '').replace('\r', '').split(" ")[0]
+        else:
+            client_name = ""
+
+        email_from = f'{cab_from_name}<br>{client_name}'
+
         # Set default `from_name` if unset.
         if from_name is None:
-            from_name = (self.cab.get("email", "from_name")
-                         or "Raspberry Pi") + f" <{self.username}>"
+            from_name = f"{cab_from_name} <{self.username}>"
 
         # Set default `to_addr` if unset.
         if to_addr is None:
@@ -79,7 +94,7 @@ class Mail:
                 return
 
         # Append `signature` to the `body` of the email.
-        signature = signature or f"<br><br>Thanks,<br>{from_name}"
+        signature = signature or f"<br><br>Thanks,<br>{email_from}"
         body += unquote(signature)
 
         # Create the message object.
