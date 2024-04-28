@@ -643,9 +643,6 @@ class Cabinet:
             if is_print:
                 print(result)
 
-            if is_print:
-                print(result)
-
             # Handle return_type if specified
             if return_type is not None:
                 try:
