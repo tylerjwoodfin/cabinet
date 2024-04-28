@@ -12,6 +12,7 @@ Usage:
     cab = Cabinet()
     ```
 """
+import inspect
 import os
 import ast
 import sys
@@ -26,6 +27,7 @@ import importlib.metadata
 from datetime import date, datetime
 from typing import Any, Type, Optional, TypeVar
 import pymongo.errors
+from prompt_toolkit import print_formatted_text, HTML
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from bson import json_util, ObjectId
@@ -64,7 +66,7 @@ class Cabinet:
     path_config_dir = str(pathlib.Path(
         __file__).resolve().parent)
     path_config_file = f"{path_config_dir}/cabinet_config.json"
-    path_cabinet: str | None = None
+    path_cabinet: str = ''
     path_log: str = ''
 
     def _get_config(self, key=None):
@@ -710,84 +712,70 @@ class Cabinet:
             None
         """
 
-        def _get_logger(log_name: str | None = None,
-                        level: int = logging.INFO,
-                        log_folder_path: str | None = None,
-                        is_quiet: bool = False) -> logging.Logger:
-            """
-            Returns a customized logger object with the specified name and level,
-            and optionally logs to a file.
-
-            Args:
-            - log_name (str): the name of the logger (defaults to 'root')
-            - level (int): the logging level to use (defaults to logging.INFO)
-            - log_folder_path (str): the path to a file to log to
-                (defaults to None, meaning log only to console)
-            - is_quiet (bool): if True, only logs to file and not to console (defaults to False)
-
-            Returns:
-            - logger (Logger): the configured logger object
-            """
-
-            today = str(date.today())
-
-            if not self.path_cabinet:
-                raise ValueError("_get_logger: self.path_cabinet not available")
-
-            if log_folder_path is None:
-                log_folder_path = f"{self.path_log or self.path_cabinet + '/log/'}{today}"
-            else:
-                log_folder_path = os.path.expanduser(log_folder_path)
-
-            if log_name is None:
-                log_name = f"LOG_DAILY_{today}"
-
-            # create path if necessary
-            if not os.path.exists(log_folder_path):
-                self._ifprint(f"Creating {log_folder_path}", self.new_setup is True)
-                os.makedirs(log_folder_path)
-
-            logger = logging.getLogger(log_name)
-
-            logger.setLevel(level)
-
-            if logger.handlers:
-                logger.handlers = []
-
-            format_string = "%(asctime)s — %(levelname)s — %(message)s"
-            log_format = logging.Formatter(format_string)
-
-            # only add console handler if not is_quiet
-            if not is_quiet:
-                console_handler = logging.StreamHandler(sys.stdout)
-                console_handler.setFormatter(log_format)
-                logger.addHandler(console_handler)
-
-            file_handler = logging.FileHandler(
-                os.path.join(log_folder_path, f"{log_name}.log"), mode='a')
-            file_handler.setFormatter(log_format)
-
-            logger.addHandler(file_handler)
-            return logger
-
         if level is None:
             level = 'info'
 
-        # validate log level
-        valid_levels = {'debug', 'info', 'warn',
-                        'warning', 'error', 'critical'}
+        valid_levels = {'debug', 'info', 'warning', 'error', 'critical'}
         if level.lower() not in valid_levels:
-            raise ValueError(
-                f"Invalid log level: {level}. Must be one of {', '.join(valid_levels)}.")
+            raise ValueError(f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}.")
 
-        # get logger instance
-        logger = _get_logger(log_name=log_name, level=level.upper(),
-                             log_folder_path=log_folder_path, is_quiet=is_quiet)
+        # Set up color mapping for console output
+        color_map = {
+            'debug': 'ansiwhite',
+            'info': 'ansigreen',
+            'warning': 'ansiyellow',
+            'error': 'ansired',
+            'critical': 'ansimagenta'
+        }
 
-        # log message
+        # Custom console handler to only print colored level and message
+        class ColorConsoleHandler(logging.StreamHandler):
+            """
+            allows for colorful console logs
+            """
+            def emit(self, record):
+                color = color_map[record.levelname.lower()]
+                msg = self.format(record)
+                print_formatted_text(HTML(f'<{color}>'
+                                        f'{record.levelname}: {msg}</{color}>'))
+
+        # Configure logger
+        today = str(date.today())
+        log_folder_path = log_folder_path or \
+            f"{self.path_log or self.path_cabinet + '/log/'}{today}"
+        log_folder_path = os.path.expanduser(log_folder_path)
+
+        if log_name is None:
+            log_name = f"LOG_DAILY_{today}"
+
+        # Get or create logger
+        logger = logging.getLogger(log_name)
+        logger.setLevel(getattr(logging, level.upper()))
+
+        # Clear existing handlers if they exist
+        if logger.hasHandlers():
+            logger.handlers = []
+
+        # File handler for writing complete logs
+        file_handler = logging.FileHandler(os.path.join(
+            log_folder_path, f"{log_name}.log"),mode='a')
+        stack = [os.path.basename(filename.filename) for filename in inspect.stack()]
+        stack = list(dict.fromkeys(stack))
+        caller_frame_record = ' -> '.join(reversed(stack))
+        file_handler.setFormatter(logging.Formatter(
+            f"%(asctime)s — %(levelname)s -> {caller_frame_record}: %(message)s"))
+        logger.addHandler(file_handler)
+
+        # Add color console handler if not is_quiet
+        if not is_quiet:
+            console_handler = ColorConsoleHandler()
+            console_handler.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(console_handler)
+
+        # Log the message
         getattr(logger, level.lower())(message)
 
-    def get_file_as_array(self, file_name: str, file_path=None, strip: bool = True,
+    def get_file_as_array(self, file_name: str, file_path: str = '', strip: bool = True,
                           ignore_not_found: bool = False):
         """
         Reads a file and returns its contents as a list of lines.
@@ -806,10 +794,10 @@ class Cabinet:
             A list of lines, or None if the file is not found and ignore_not_found is True.
         """
 
-        if file_path is None:
+        if not file_path:
             file_path = self.path_log
         elif file_path == "notes":
-            file_path = self.get('path', 'notes')
+            file_path = self.get('path', 'notes') or "~/.cabinet/notes"
 
         if not file_path[-1] == '/':
             file_path += '/'
@@ -922,7 +910,11 @@ def main():
     """
 
     cab = Cabinet()
-    package_name = sys.modules[__name__].__package__.split('.')[0]
+    package_name = sys.modules[__name__].__package__
+    if package_name:
+        package_name = package_name.split('.')[0]
+    else:
+        package_name = 'cabinet'
     version = importlib.metadata.version(package_name)
 
     class ValidatePutArgs(argparse.Action):
@@ -1002,7 +994,7 @@ def main():
         cab.remove(*attribute_values, is_print=True)
     elif args.get_file:
         cab.get_file_as_array(file_name=args.get_file,
-                              file_path=None, strip=args.strip)
+                              file_path='', strip=args.strip)
     elif args.log:
         cab.log(message=args.log, level=args.log_level)
     elif args.export:
