@@ -12,6 +12,9 @@ from urllib.parse import unquote
 import sys
 import pwd
 import os
+import subprocess
+import shlex
+from typing import List
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import cabinet
@@ -137,6 +140,42 @@ class Mail:
             self.cab.log(
                 f"Could not log into {self.username}; set this with Cabinet.\n\n{err}",
                 level="error")
+
+    def send_in_background(self, subject: str, body: str, to_addr: str = '') -> None:
+        """
+        Sends an email in the background to allow scripts to complete without waiting.
+
+        Args:
+            subject (str): The subject line of the email.
+            body (str): The main content of the email.
+            to_addr (str, optional): The recipient's email address.
+                If not provided, defaults to the first address in the cabinet -> email -> to
+
+        Returns:
+            None
+        """
+        # Fetch default to_addr if not provided
+        if not to_addr:
+            cab_to: List[str] = self.cab.get("email", "to", return_type=list) or []
+            to_addr = cab_to[0] if cab_to else ''
+            if not to_addr:
+                self.cab.log("No email address to send_in_background", level="error")
+                return  # Exit if there is no address to send to
+
+        # Sanitize and prepare arguments to avoid shell injection and handle internal single quotes
+        subject = shlex.quote(subject)
+        body = shlex.quote(body)
+        to_addr = shlex.quote(to_addr)
+
+        # Prepare the command string with proper quoting
+        command = f"cabinet --mail -s {subject} -b {body}"
+        if to_addr:
+            command += f" --to {to_addr}"
+
+        # Schedule the command to run immediately using 'at'
+        schedule_command = f'echo {command} | at now'
+        subprocess.Popen(schedule_command, shell=True,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":
