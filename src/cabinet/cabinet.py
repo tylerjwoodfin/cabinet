@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+
 """
 Cabinet provides a simple interface for storing and retrieving data in a centralized location.
 
@@ -275,7 +277,8 @@ class Cabinet:
             sys.exit(-1)
 
 
-        path_log = helpers.resolve_path(self.get('path', 'log', returnType=str) or '~/.cabinet/log')
+        path_log = helpers.resolve_path(self.get('path', 'log', return_type=str) \
+            or '~/.cabinet/log')
         path_log_slash = os.path.join(path_log, '')
 
         # Create the directory if it doesn't exist
@@ -567,9 +570,9 @@ class Cabinet:
 
         return value
 
-    T = TypeVar('T', bound=Any)  # Generic type variable for returnType
+    T = TypeVar('T', bound=Any)  # Generic type variable for return_type
     def get(self, *attributes, warn_missing: bool = False, is_print: bool = False,
-            no_cache: bool = False, returnType: Optional[Type[T]] = None) -> Optional[T]:
+            no_cache: bool = False, return_type: Optional[Type[T]] = None) -> Optional[T]:
         """
             Returns a property or properties from MongoDB based on the input attributes,
             using a cache file to improve performance.
@@ -579,12 +582,12 @@ class Cabinet:
                 warn_missing (bool, optional): Whether to warn if an attribute is missing.
                 is_print (bool, optional): Whether to print the return value.
                 no_cache (bool, optional): Whether to force a fresh MongoDB call.
-                returnType (Type[T], optional): The expected return type of the result.
+                return_type (Type[T], optional): The expected return type of the result.
                     Defaults to object, which includes any type.
 
             Returns:
                 The value of the attribute if it exists in the cache or MongoDB,
-                cast to returnType, otherwise None.
+                cast to return_type, otherwise None.
 
             Usage:
                 get('person', 'tyler', 'salary')  # Returns the value of person -> tyler -> salary
@@ -643,15 +646,15 @@ class Cabinet:
             if is_print:
                 print(result)
 
-            # Handle returnType if specified
-            if returnType is not None:
+            # Handle return_type if specified
+            if return_type is not None:
                 try:
-                    return returnType(result)
+                    return return_type(result)
                 except (ValueError, TypeError) as e:
-                    self.log(f"Error casting result to {returnType}: {str(e)}", level="error")
+                    self.log(f"Error casting result to {return_type}: {str(e)}", level="error")
                     return None
             else:
-                return result  # Return as is if no specific returnType is needed
+                return result  # Return as is if no specific return_type is needed
 
         if warn_missing:
             self.log("No document found in cache or MongoDB", level="warn")
@@ -853,7 +856,7 @@ class Cabinet:
             if not path_file:
                 path_file = helpers.resolve_path(self.path_log or '~/.cabinet/log')
             elif path_file == "notes":
-                path_notes: str = self.get('path', 'notes', returnType=str) or ''
+                path_notes: str = self.get('path', 'notes', return_type=str) or ''
                 path_file = helpers.resolve_path(path_notes or self.path_log or '~/.cabinet/notes')
 
             # create directory if it does not exist
