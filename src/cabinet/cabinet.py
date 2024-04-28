@@ -827,46 +827,57 @@ class Cabinet:
             return None
 
     def write_file(self, file_name: str, path_file: str = '',
-                   content: Optional[str] = None, append: bool = False,
-                   is_quiet: bool = False) -> bool:
+                content: Optional[str] = None, append: bool = False,
+                is_quiet: bool = False) -> bool:
         """
-        writes a file to the specified path, creating necessary subfolders.
-        resolves aliases in paths.
+        Writes a file to the specified path, creating necessary subfolders.
+        Resolves aliases in paths.
 
-        args:
+        Args:
             file_name (str): the name of the file to write.
             path_file (str, optional): the directory path for the file.
-                uses default log path if empty.
-                use 'notes' for cabinet -> path -> notes
+                Uses default log path if empty.
+                Use 'notes' for cabinet -> path -> notes
             content (str, optional): the content to write to the file.
-                creates an empty file if none.
+                Creates an empty file if none.
             append (bool, optional): set to true to append to the file instead of overwriting.
-                defaults to false.
+                Defaults to false.
             is_quiet (bool, optional): set to true to suppress status messages.
-                defaults to false.
+                Defaults to false.
 
-        returns:
-            true if the file was successfully written, false otherwise.
+        Returns:
+            True if the file was successfully written, False otherwise.
         """
         try:
-            # handle default file path and notes alias
+            # Handle default file path and notes alias
             if not path_file:
                 path_file = helpers.resolve_path(self.path_log or '~/.cabinet/log')
             elif path_file == "notes":
                 path_notes: str = self.get('path', 'notes', return_type=str) or ''
                 path_file = helpers.resolve_path(path_notes or self.path_log or '~/.cabinet/notes')
 
-            # create directory if it does not exist
+            # Create directory if it does not exist
             os.makedirs(path_file, exist_ok=True)
 
-            # write content to file
+            # Full path to the file
+            full_path = os.path.join(path_file, file_name)
+
+            # Check if appending and the file exists and is not empty
+            if append and os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+                with open(full_path, 'r+', encoding="utf8") as file:
+                    file.seek(0, os.SEEK_END)  # Move to the end of file
+                    file.seek(file.tell() - 1, os.SEEK_SET)  # Move back one character
+                    if file.read(1) != '\n':
+                        content = '\n' + (content or "")
+
+            # Write content to file
             mode = 'a+' if append else 'w'
-            with open(os.path.join(path_file, file_name), mode, encoding="utf8") as file:
+            with open(full_path, mode, encoding="utf8") as file:
                 file.write(content or "")
 
-            # optionally print status message
+            # Optionally print status message
             if not is_quiet:
-                print(f"wrote to '{os.path.join(path_file, file_name)}'")
+                print(f"Wrote to '{full_path}'")
 
             return True
         except (OSError, IOError) as error:
