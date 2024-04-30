@@ -24,6 +24,7 @@ import pathlib
 import argparse
 import subprocess
 import importlib.metadata
+from html import escape
 from datetime import date, datetime
 from typing import Any, Type, Optional, TypeVar
 import pymongo.errors
@@ -739,8 +740,10 @@ class Cabinet:
             def emit(self, record):
                 color = color_map[record.levelname.lower()]
                 msg = self.format(record)
+                escaped_msg = escape(msg)
+
                 print_formatted_text(HTML(f'<{color}>'
-                                        f'{record.levelname}: {msg}</{color}>'))
+                                        f'{record.levelname}: {escaped_msg}</{color}>'))
 
         # Configure logger
         today = str(date.today())
