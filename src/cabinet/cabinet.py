@@ -715,6 +715,9 @@ class Cabinet:
         if level is None:
             level = 'info'
 
+        if level == 'warn':
+            level = 'warning'
+
         valid_levels = {'debug', 'info', 'warning', 'error', 'critical'}
         if level.lower() not in valid_levels:
             raise ValueError(f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}.")
