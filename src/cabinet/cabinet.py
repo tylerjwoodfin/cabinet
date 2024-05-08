@@ -751,6 +751,9 @@ class Cabinet:
             f"{self.path_log or self.path_cabinet + '/log/'}{today}"
         log_folder_path = os.path.expanduser(log_folder_path)
 
+        if not os.path.exists(log_folder_path):
+            os.makedirs(log_folder_path)
+
         if log_name is None:
             log_name = f"LOG_DAILY_{today}"
 
