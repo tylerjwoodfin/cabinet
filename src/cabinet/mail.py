@@ -9,11 +9,12 @@ A throwaway email is highly recommended.
 
 import smtplib
 from urllib.parse import unquote
-import sys
-import pwd
-import os
 import subprocess
+import socket
 import shlex
+import pwd
+import sys
+import os
 from typing import List
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -56,7 +57,7 @@ class Mail:
         - to_addr (List): A list of email addresses to send the email to.
         - from_name (str, optional): The name to appear in the "From" field of the email.
             Reads from cabinet -> email -> from_name if unset.
-            If this is unset, defaults to os.getenv("HOSTNAME") or `Cabinet`
+            If this is unset, defaults to machine's hostname or `Cabinet`
         - logging_enabled (bool, optional): Whether to log the email send event.
             Defaults to True.
         - is_quiet: Whether to suppress log output.
@@ -68,9 +69,9 @@ class Mail:
         Gmail will almost certainly not work.
         """
 
-        hostname = os.getenv("HOSTNAME")
+        hostname = socket.gethostname()
         if hostname:
-            hostname = hostname.capitalize()
+            hostname = hostname.capitalize().replace(".local", "")
 
         cab_from_name = self.cab.get("email", "from_name") or hostname or "Cabinet"
 
