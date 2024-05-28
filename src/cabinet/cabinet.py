@@ -17,7 +17,6 @@ import os
 import ast
 import sys
 import json
-import time
 import logging
 import getpass
 import pathlib
@@ -25,12 +24,14 @@ import argparse
 import subprocess
 import importlib.metadata
 from html import escape
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Type, Optional, TypeVar
 import pymongo.errors
 from prompt_toolkit import print_formatted_text, HTML
+from pymongo.errors import PyMongoError, OperationFailure, ConnectionFailure
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from pymongo.database import Database
 from bson import json_util, ObjectId
 from . import helpers
 from .constants import (
@@ -62,13 +63,14 @@ class Cabinet:
     mongodb_db_name: str = ''
     mongodb_uri = ""
     client: MongoClient | None = None
-    database = None
+    database: Database
     new_setup: bool = False
     path_config_dir = str(pathlib.Path(
         __file__).resolve().parent)
     path_config_file = f"{path_config_dir}/cabinet_config.json"
     path_cabinet: str = ''
     path_log: str = ''
+    cached_data: dict = {}
 
     def _get_config(self, key=None):
         """
@@ -265,7 +267,10 @@ class Cabinet:
                         f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
                         f"{self.mongodb_db_name}?retryWrites=true&w=majority")
             self.client = MongoClient(self.uri, server_api=ServerApi('1'))
-            self.database = self.client.cabinet
+            self.database = self.client[self.mongodb_db_name]
+            if self.database is None:
+                self.log("Database cannot be initialized", level="error")
+                return None
         except pymongo.errors.InvalidURI as error:
             print(ERROR_CONFIG_FILE_INVALID)
             print(error._message)
@@ -348,17 +353,29 @@ class Cabinet:
             else:
                 print(f"Please edit ${self.path_config_file} to configure.")
 
-    def update_cache(self, path: str | None = None) -> str | None:
+    def update_cache(self, path: str | None = None, force: bool = False) -> str | None:
         """
         Writes all MongoDB data to a cache file for faster reads in most situations.
         Creates the cache file if it does not exist.
         
         Args:
             - path (str): full path, including filename, of cache.json
+            - force (bool): update cache regardless of how  old cache file is.
+                - overridden to 'true' if caller function is `put`.
         """
+
+        force_update: bool =  force or inspect.stack()[1].function == 'put'
 
         if path is None:
             path = f"{self.path_config_dir}/cache.json"
+
+        # Check if cache file exists and is less than 1 hour old
+        if not force_update and os.path.exists(path):
+            file_mod_time = datetime.fromtimestamp(os.path.getmtime(path))
+            if datetime.now() - file_mod_time < timedelta(hours=1):
+                with open(path, "r", encoding="utf-8") as cache_file:
+                    self.cached_data = json.load(cache_file)
+                return None
 
         collection_data = self.database.cabinet.find()
         json_data = json.dumps(list(collection_data), indent=4, default=json_util.default)
@@ -371,6 +388,8 @@ class Cabinet:
         except OSError as e:
             self.log(f"Error updating cache: {e}", level="error")
             return None
+
+        self.cached_data = json.loads(json_data)
 
         return json_data
 
@@ -408,6 +427,8 @@ class Cabinet:
                 modified_data)  # Insert the modified data
 
             print("Data in the collection has been updated.")
+
+            self.update_cache()
 
         except FileNotFoundError:
             print("Error: Cache file not found.")
@@ -555,6 +576,10 @@ class Cabinet:
 
         existing_data = self.database.cabinet.find_one({}, {"_id": 0})
 
+        if not existing_data:
+            self.log("Could not fetch MongoDB data after update", level="error")
+            return None
+
         # Merge the new data with the existing data
         update = {"$set": {}}
 
@@ -571,66 +596,45 @@ class Cabinet:
             print(
                 f"{' -> '.join(attribute[:-1])} set to {value}\n")
 
+        self.update_cache()
+
         return value
 
     T = TypeVar('T', bound=Any)  # Generic type variable for return_type
     def get(self, *attributes, warn_missing: bool = False, is_print: bool = False,
             no_cache: bool = False, return_type: Optional[Type[T]] = None) -> Optional[T]:
         """
-            Returns a property or properties from MongoDB based on the input attributes,
-            using a cache file to improve performance.
+        Returns a property or properties from MongoDB based on the input attributes,
+        using a cache file to improve performance.
 
-            Args:
-                *attributes (str): A sequence of strings representing nested attributes.
-                warn_missing (bool, optional): Whether to warn if an attribute is missing.
-                is_print (bool, optional): Whether to print the return value.
-                no_cache (bool, optional): Whether to force a fresh MongoDB call.
-                return_type (Type[T], optional): The expected return type of the result.
-                    Defaults to object, which includes any type.
+        Args:
+            *attributes (str): A sequence of strings representing nested attributes.
+            warn_missing (bool, optional): Whether to warn if an attribute is missing.
+            is_print (bool, optional): Whether to print the return value.
+            no_cache (bool, optional): Whether to force a fresh MongoDB call.
+            return_type (Type[T], optional): The expected return type of the result.
+                Defaults to object, which includes any type.
 
-            Returns:
-                The value of the attribute if it exists in the cache or MongoDB,
-                cast to return_type, otherwise None.
+        Returns:
+            The value of the attribute if it exists in the cache or MongoDB,
+            cast to return_type, otherwise None.
 
-            Usage:
-                get('person', 'tyler', 'salary')  # Returns the value of person -> tyler -> salary
-            """
+        Usage:
+            get('person', 'tyler', 'salary')  # Returns the value of person -> tyler -> salary
+        """
 
-        path_cache_file = f"{self.path_config_dir}/cache.json"
         cache_update_needed = no_cache
 
-        # Check if cache file exists and is less than 1 hour old
-        if os.path.exists(path_cache_file):
-            last_modified = os.path.getmtime(path_cache_file)
-            if (time.time() - last_modified) / 3600 > 1:
-                cache_update_needed = True
-        else:
-            cache_update_needed = True
+        # Check if cache data is available and not expired
+        if not no_cache and hasattr(self, 'cached_data') and 'expiresAt' in self.cached_data:
+            expires_at = datetime.fromisoformat(self.cached_data['expiresAt'])
+            cache_update_needed = datetime.now(timezone.utc) >= expires_at
 
-        if cache_update_needed:
+        if cache_update_needed or not self.cached_data:
             self.update_cache()
 
-        # Read from cache
-        try:
-            with open(path_cache_file, "r", encoding="utf-8") as file:
-                cached_data = json.load(file)
-        except FileNotFoundError:
-            self.log(f"Cache file not found at {path_cache_file}", level="warn")
-            return None
-        except json.decoder.JSONDecodeError:
-            self.log(f"Could not read Cabinet cache at {path_cache_file}. Clearing.", level="warn")
-            try:
-                os.remove(path_cache_file)
-                print(f"File removed successfully: {path_cache_file}")
-                print("Please retry your last command.")
-                sys.exit(0)
-            except PermissionError:
-                self.log(f"Permission denied: Unable to delete the file at {path_cache_file}",
-                         level="error")
-            return None
-
         # Process the cached data
-        for document in cached_data:
+        for document in self.cached_data:
             result = document
             for attribute in attributes:
                 if isinstance(result, dict) and attribute in result:
@@ -644,7 +648,10 @@ class Cabinet:
                 result = helpers.resolve_path(result)
 
             if is_print:
-                print(result)
+                if isinstance(result, dict):
+                    print(json.dumps(result, indent=4))
+                else:
+                    print(result)
 
             # Handle return_type if specified
             if return_type is not None:
@@ -654,16 +661,28 @@ class Cabinet:
                     self.log(f"Error casting result to {return_type}: {str(e)}", level="error")
                     return None
             else:
-                return result  # Return as is if no specific return_type is needed
+                # return as-is if no specific return_type is needed
+                return result  # type: ignore
 
         if warn_missing:
-            self.log("No document found in cache or MongoDB", level="warn")
+            self.log(f"'{attributes}' not found in cache or MongoDB", level="warn")
         return None
 
-    def remove(self, *attribute, is_print: bool = False):
+    def remove(self, *attribute: str, is_print: bool = False):
         """
-        Removes a property from the data
+        Removes a property from the data in the MongoDB collection.
+
+        Args:
+            attribute: A variable length argument list representing \
+                the nested structure of the attribute to remove.
+            is_print (bool): Whether to print the result of the removal operation.
+
+        Example:
+            To remove the nested attribute `a.b.c`, call remove('a', 'b', 'c').
         """
+
+        if not attribute or len(attribute) < 1:
+            raise ValueError("At least one attribute must be provided")
 
         custom_filter = {}
 
@@ -683,7 +702,21 @@ class Cabinet:
             json_structure[attribute[0]] = 1
             update = {"$unset": json_structure}
 
-        result = self.database.cabinet.update_many(custom_filter, update)
+        try:
+            result = self.database.cabinet.update_many(custom_filter, update)
+        except ConnectionFailure as e:
+            print(f"Connection failure: {e}")
+            return
+        except OperationFailure as e:
+            print(f"Operation failure: {e}")
+            return
+        except PyMongoError as e:
+            print(f"General PyMongo error: {e}")
+            return
+        # pylint: disable=W0703
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            return
 
         if is_print:
             print(f"Modified {result.modified_count} item(s)")
