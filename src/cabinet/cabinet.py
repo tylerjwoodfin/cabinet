@@ -64,7 +64,7 @@ class Cabinet:
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
-    new_setup: bool = False
+    is_new_setup: bool = False
     path_config_dir = str(pathlib.Path(
         __file__).resolve().parent)
     path_config_file = f"{path_config_dir}/cabinet_config.json"
@@ -98,7 +98,7 @@ class Cabinet:
 
             If the key is 'mongodb_password', 'mongodb_cluster_name',
             'mongodb_db_name', or 'path_cabinet'
-            and the new_setup flag is True, the user will be prompted to
+            and the is_new_setup flag is True, the user will be prompted to
             enter the corresponding value
             for the new configuration.
 
@@ -132,7 +132,7 @@ class Cabinet:
                 return json.load(file)[key]
         except FileNotFoundError:
             # setup
-            self.new_setup = True
+            self.is_new_setup = True
 
             # make .cabinet directory, if needed
             path_cabinet = helpers.resolve_path("~/.cabinet")
@@ -147,7 +147,7 @@ class Cabinet:
 
             return config_prompts(key)
         except KeyError:
-            if self.new_setup:
+            if self.is_new_setup:
                 return config_prompts(key)
             else:
                 print(
@@ -192,7 +192,7 @@ class Cabinet:
             with open(self.path_config_file, 'x+', encoding="utf8") as file:
                 self._ifprint(
                     "Note: Could not find an existing config file; creating a new one.",
-                    self.new_setup is False)
+                    self.is_new_setup is False)
                 file.write('{}')
                 config = {}
 
@@ -202,7 +202,7 @@ class Cabinet:
             json.dump(config, file, indent=4)
 
         print(f"\nUpdated configuration file ({self.path_config_file}).")
-        self._ifprint(f"{key} is now {value}\n", self.new_setup is False)
+        self._ifprint(f"{key} is now {value}\n", self.is_new_setup is False)
 
         return value
 
@@ -260,7 +260,7 @@ class Cabinet:
             self.config()
             sys.exit(-1)
 
-        self.new_setup = False
+        self.is_new_setup = False
 
         try:
             self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
@@ -400,7 +400,7 @@ class Cabinet:
         """
 
         path_cache_file = f"{self.path_config_dir}/cache.json"
-        json_data = self.update_cache(path_cache_file)
+        json_data = self.update_cache(path_cache_file, force=True)
 
         try:
 
