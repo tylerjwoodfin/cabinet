@@ -52,6 +52,12 @@ such as logs and settings.
 Default: {pathlib.Path.home().resolve()}/.cabinet
 """
 
+CONFIG_EDITOR: str = """
+Select your preferred editor from the list.
+\n\n
+If you're not sure, just hit Enter.
+"""
+
 EDIT_FILE_DEFAULT = """
 Enter the path of the file you want to edit.
 (default: edit Cabinet's MongoDB collection):\n
@@ -100,4 +106,12 @@ Timeout error: Could not connect to the MongoDB server:
 
 ERROR_MONGODB_DNS = """
 DNS resolution failed for MongoDB server:
+"""
+
+ERROR_CONFIG_INVALID_EDITOR = """
+I didn't understand that.
+
+Your editor will be set to 'nano'.
+
+Change this at any time with `cabinet --config`.
 """

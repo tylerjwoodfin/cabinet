@@ -42,10 +42,12 @@ from .constants import (
     CONFIG_MONGODB_CLUSTER_NAME,
     CONFIG_MONGODB_DB_NAME,
     CONFIG_PATH_CABINET,
+    CONFIG_EDITOR,
     EDIT_FILE_DEFAULT,
     ERROR_CONFIG_MISSING_VALUES,
     ERROR_CONFIG_JSON_DECODE,
     ERROR_CONFIG_FILE_INVALID,
+    ERROR_CONFIG_INVALID_EDITOR,
     ERROR_MONGODB_TIMEOUT,
     ERROR_MONGODB_DNS
 )
@@ -64,13 +66,14 @@ class Cabinet:
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
-    is_new_setup: bool = False
     path_config_dir = str(pathlib.Path(
         __file__).resolve().parent)
     path_config_file = f"{path_config_dir}/cabinet_config.json"
     path_cabinet: str = ''
+    editor: str = 'nano'
     path_log: str = ''
     cached_data: dict = {}
+    is_new_setup: bool = False
 
     def _get_config(self, key=None):
         """
@@ -107,22 +110,49 @@ class Cabinet:
             to overwrite the file with an empty dictionary or fix the file manually.
         """
 
+        def get_editor():
+            # List of common terminal text editors
+            editors: list[str] = ["nano", "vim", "nvim", "emacs", "vi", "pico", "mcedit"]
+
+            # Check if each editor is available in the system's PATH
+            available_editors = []
+            for editor in editors:
+                result = subprocess.run(["which", editor],
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        check=False)
+                if result.returncode == 0:
+                    available_editors.append(editor)
+
+            # Display the available editors to the user for selection
+            if available_editors:
+                # Prompt the user to select an editor
+                selection = input(CONFIG_EDITOR)
+                try:
+                    selected_editor: str = available_editors[int(selection) - 1]
+                    return selected_editor
+                except (IndexError, ValueError):
+                    print(ERROR_CONFIG_INVALID_EDITOR)
+                    return "nano"
+            else:
+                print("No common terminal text editors found.")
+
         def config_prompts(key=None):
             if key == 'mongodb_username':
                 value = input(CONFIG_MONGODB_USERNAME)
-                self._put_config(key, value)
             if key == 'mongodb_password':
                 value = getpass.getpass(CONFIG_MONGODB_PASSWORD)
-                self._put_config(key, value)
             if key == 'mongodb_cluster_name':
                 value = input(CONFIG_MONGODB_CLUSTER_NAME)
-                self._put_config(key, value)
             if key == 'mongodb_db_name':
                 value = input(CONFIG_MONGODB_DB_NAME)
-                self._put_config(key, value)
             if key == 'path_cabinet':
                 value = input(CONFIG_PATH_CABINET) \
                     or f"{pathlib.Path.home().resolve()}/.cabinet"
+            if key == 'editor':
+                value = get_editor()
+
+            if value:
                 self._put_config(key, value)
 
             return value
@@ -243,11 +273,13 @@ class Cabinet:
         if path_cabinet is not None:
             self.path_cabinet = path_cabinet
         else:
-            self.path_cabinet = helpers.resolve_path(self._get_config('path_cabinet'))
+            self.path_cabinet = helpers.resolve_path(
+                self._get_config('path_cabinet') or '~/.cabinet')
 
         # these should match class attributes above
         keys = ["mongodb_username", "mongodb_password",
-                "mongodb_cluster_name", "mongodb_db_name", "path_cabinet"]
+                "mongodb_cluster_name", "mongodb_db_name", "path_cabinet",
+                "editor"]
 
         for key in keys:
             if key == 'path_cabinet' and path_cabinet is not None:
@@ -395,17 +427,17 @@ class Cabinet:
 
     def edit_db(self):
         """
-        Opens the data in self.database.cabinet within a JSON file in Vim.
+        Opens the data in self.database.cabinet within a JSON file in
+        Vim (default) or the editor specified in `cabinet --config` -> `editor`.
         When the file is closed, it replaces the data in this collection in MongoDB.
         """
-
         path_cache_file = f"{self.path_config_dir}/cache.json"
         json_data = self.update_cache(path_cache_file, force=True)
 
         try:
 
-            # Open the cache file in Vim
-            subprocess.run(["vim", path_cache_file], check=True)
+            # Edit the cache file
+            subprocess.run([self.editor, path_cache_file], check=True)
 
             # Read the modified JSON data from the cache
             with open(path_cache_file, "r", encoding="utf-8") as file_cache:
@@ -433,7 +465,7 @@ class Cabinet:
         except FileNotFoundError:
             print("Error: Cache file not found.")
         except subprocess.CalledProcessError:
-            print("Error: Failed to open the file in Vim.")
+            print(f"Error: Failed to open the file in '{self.editor}'.")
         except json.JSONDecodeError:
             self.log("Failed to parse the modified JSON data.", level="error")
             self.log("Refreshing cache with original data.", level="info")
@@ -443,7 +475,7 @@ class Cabinet:
 
     def edit_file(self, file_path: str | None = None, create_if_not_exist: bool = True) -> None:
         """
-        Edit and save a file in Vim.
+        Edit and save a file in Vim (default) or specified editor in `cabinet --config`.
 
         Args:
             - file_path (str, optional): The path to the file to edit.
@@ -499,7 +531,7 @@ class Cabinet:
         with open(file_path, "r", encoding="utf-8") as file:
             original_contents = file.readlines()
 
-        os.system(f"vim {file_path}")
+        os.system(f"{self.editor} {file_path}")
 
         with open(file_path, "r", encoding="utf-8") as file:
             new_contents = file.readlines()
