@@ -428,7 +428,7 @@ class Cabinet:
     def edit_db(self):
         """
         Opens the data in self.database.cabinet within a JSON file in
-        Vim (default) or the editor specified in `cabinet --config` -> `editor`.
+        Nano (default) or the editor specified in `cabinet --config` -> `editor`.
         When the file is closed, it replaces the data in this collection in MongoDB.
         """
         path_cache_file = f"{self.path_config_dir}/cache.json"
@@ -475,7 +475,7 @@ class Cabinet:
 
     def edit_file(self, file_path: str | None = None, create_if_not_exist: bool = True) -> None:
         """
-        Edit and save a file in Vim (default) or specified editor in `cabinet --config`.
+        Edit and save a file in Nano (default) or specified editor in `cabinet --config`.
 
         Args:
             - file_path (str, optional): The path to the file to edit.
