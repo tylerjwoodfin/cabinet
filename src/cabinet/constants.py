@@ -117,3 +117,13 @@ Your editor will be set to 'nano'.
 
 Change this at any time with `cabinet --config`.
 """
+
+ERROR_CONFIG_BROKEN_EDITOR = """
+Cabinet's editor is set to %, but this editor cannot be used.
+
+Please update the editor by using `cabinet --config` and updating
+the editor attribute.
+
+Your editor has been reset to 'nano', so if you try your last command
+again, you shouldn't see this error.
+"""
