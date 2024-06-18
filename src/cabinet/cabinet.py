@@ -48,6 +48,7 @@ from .constants import (
     ERROR_CONFIG_JSON_DECODE,
     ERROR_CONFIG_FILE_INVALID,
     ERROR_CONFIG_INVALID_EDITOR,
+    ERROR_CONFIG_BROKEN_EDITOR,
     ERROR_MONGODB_TIMEOUT,
     ERROR_MONGODB_DNS
 )
@@ -460,10 +461,15 @@ class Cabinet:
 
             print("Data in the collection has been updated.")
 
-            self.update_cache()
+            self.update_cache(force=True)
 
-        except FileNotFoundError:
-            print("Error: Cache file not found.")
+        except FileNotFoundError as err:
+            if self.editor and f"'{self.editor}'" in str(err):
+                self.log(ERROR_CONFIG_BROKEN_EDITOR.replace("%", self.editor),
+                         level="error")
+                self._put_config("editor", "nano")
+            else:
+                print(f"Error: Cache file not found in {path_cache_file}, even after updating.")
         except subprocess.CalledProcessError:
             print(f"Error: Failed to open the file in '{self.editor}'.")
         except json.JSONDecodeError:
