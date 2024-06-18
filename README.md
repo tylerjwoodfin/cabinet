@@ -1,15 +1,6 @@
 # cabinet
 A Python library to easily manage data with MongoDB and across other files.
-
 Supports a cli, email, and event logging.
-
-## MongoDB Update! - 2023-06-25
-- In this latest release, the tool has been redesigned from the ground up to use MongoDB.
-- MongoDB elevates Cabinet to the best of both worlds: a secure database with the ability to edit 
-  as if it were a JSON structure.
-- Every function has been tested for compatibility with earlier releases, but it's likely
-  there will be some edge case bugs to iron out. I use this tool extremely often in my day-to-day
-  use, so these should be patched quickly, once discovered. Please report issues as you find them.
 
 ## Features
 
@@ -73,7 +64,12 @@ Mail:
 
 - Upon first launch, the tool will prompt you to enter your MongoDB credentials, as well as
   the cluster name and Database name. These are stored only within the package, as a file named
-  `cabinet_config.json`.
+  `cabinet_config.json` within the package directory.
+
+- You will be asked to configure your default editor from the list of available editors on
+  your system. If this step is skipped, or an error occurs, `nano` will be used.
+
+  You can change this with `cabinet --config` and modifying the `editor` attribute.
 
 ### edit_file() shortcuts
 - see example below to enable something like
@@ -222,7 +218,7 @@ cab = Cabinet()
 
 # if put("path", "edit", "shopping", "/path/to/shopping.md") has been called, this will edit the file assigned to that shortcut.
 
-# opens file in Vim, saves upon exit
+# opens file in the default editor (`cabinet --config` -> 'editor'), saves upon exit
 cab.edit("shopping")
 
 # or you can edit a file directly...
