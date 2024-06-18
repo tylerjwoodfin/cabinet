@@ -72,6 +72,7 @@ mongodb_password
 mongodb_cluster_name
 mongodb_db_name
 path_cabinet
+editor
 
 Please try re-running Cabinet.
 
@@ -79,14 +80,15 @@ Otherwise, please leave feedback at https://github.com/tylerjwoodfin/cabinet/iss
 """
 
 ERROR_CONFIG_MISSING_VALUES = """
-Cabinet could not initialize properly.
+Cabinet could not initialize properly- some values appear to be missing.
 
-Please check that all values in the configuration file are correct:
+Please check that all values in the configuration file exist and are properly set:
 mongodb_username
 mongodb_password
 mongodb_cluster_name
 mongodb_db_name
 path_cabinet
+editor
 
 Press Enter to open the file. Update any invalid values and try again.\n
 """
