@@ -327,6 +327,10 @@ class Cabinet:
         # Resolve the log path
         path_log_str = helpers.resolve_path(
             self.get('path', 'log', return_type=str) or '~/.cabinet/log')
+
+        if not path_log_str.endswith('/'):
+            path_log_str += '/'
+
         path_log = pathlib.Path(path_log_str)
         path_log.mkdir(parents=True, exist_ok=True)
         self.path_log = path_log_str
