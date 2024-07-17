@@ -3,7 +3,6 @@ A collection of helper functions
 """
 
 import os
-import pathlib
 
 def resolve_path(path: str) -> str:
     """
@@ -15,5 +14,4 @@ def resolve_path(path: str) -> str:
     Returns:
         str: The resolved path.
     """
-    expanded_path = os.path.expandvars(path)
-    return str(pathlib.Path(expanded_path).expanduser().resolve())
+    return os.path.expanduser(os.path.expandvars(path))
