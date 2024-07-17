@@ -63,8 +63,7 @@ Mail:
 ## Configuration
 
 - Upon first launch, the tool will prompt you to enter your MongoDB credentials, as well as
-  the cluster name and Database name. These are stored only within the package, as a file named
-  `cabinet_config.json` within the package directory.
+  the cluster name and Database name. These are stored in `~/.config/cabinet/config.json`.
 
 - You will be asked to configure your default editor from the list of available editors on
   your system. If this step is skipped, or an error occurs, `nano` will be used.
