@@ -67,9 +67,8 @@ class Cabinet:
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
-    path_config_dir = str(pathlib.Path(
-        __file__).resolve().parent)
-    path_config_file = f"{path_config_dir}/cabinet_config.json"
+    path_config_dir = helpers.resolve_path("~/.config/cabinet")
+    path_config_file = f"{path_config_dir}/config.json"
     path_cabinet: str = ''
     editor: str = 'nano'
     path_log: str = ''
@@ -149,7 +148,7 @@ class Cabinet:
                 value = input(CONFIG_MONGODB_DB_NAME)
             if key == 'path_cabinet':
                 value = input(CONFIG_PATH_CABINET) \
-                    or f"{pathlib.Path.home().resolve()}/.cabinet"
+                    or helpers.resolve_path("~/.cabinet")
             if key == 'editor':
                 value = get_editor()
 
@@ -165,11 +164,10 @@ class Cabinet:
             # setup
             self.is_new_setup = True
 
-            # make .cabinet directory, if needed
+            # Create the .cabinet directory if it doesn't exist
             path_cabinet = helpers.resolve_path("~/.cabinet")
-            path_cabinet_slash = os.path.join(path_cabinet, '')
-            if not os.path.exists(path_cabinet_slash):
-                os.makedirs(path_cabinet_slash)
+            if not pathlib.Path(path_cabinet).exists():
+                os.makedirs(path_cabinet)
 
             has_mongodb = input(NEW_SETUP_MSG_INTRO)
 
@@ -263,19 +261,27 @@ class Cabinet:
             path_cabinet (str, optional): The path to the cabinet directory. Defaults to None.
 
         Notes:
-            - The configuration is read from the `cabinet_config.json` internal file
-            file located in the 'path_cabinet' directory.
-            - If 'path_cabinet' is not provided, the default location
-            is '~/.cabinet'.
+            - The configuration is read from ~/.config/cabinet/config.json.
+            - If 'path_cabinet' is not provided in the function call or 
+                in the config.json file, the default location is '~/.cabinet'.
             - The attributes of the Cabinet instance are set based on the configuration values.
+
+        Raises:
+            pymongo.errors.InvalidURI: If the MongoDB URI is invalid.
+            pymongo.errors.ServerSelectionTimeoutError:
+                If there is a timeout while connecting to the MongoDB server.
+            pymongo.errors.ConfigurationError: If there is an error in the MongoDB configuration.
+
+        Returns:
+            None
 
         """
 
         if path_cabinet is not None:
             self.path_cabinet = path_cabinet
         else:
-            self.path_cabinet = helpers.resolve_path(
-                self._get_config('path_cabinet') or '~/.cabinet')
+            config_path = self._get_config('path_cabinet') or "~/.cabinet"
+            self.path_cabinet = helpers.resolve_path(config_path)
 
         # these should match class attributes above
         keys = ["mongodb_username", "mongodb_password",
@@ -318,15 +324,12 @@ class Cabinet:
             sys.exit(-1)
 
 
-        path_log = helpers.resolve_path(self.get('path', 'log', return_type=str) \
-            or '~/.cabinet/log')
-        path_log_slash = os.path.join(path_log, '')
-
-        # Create the directory if it doesn't exist
-        if not os.path.exists(path_log_slash):
-            os.makedirs(path_log_slash)
-
-        self.path_log = path_log_slash
+        # Resolve the log path
+        path_log_str = helpers.resolve_path(
+            self.get('path', 'log', return_type=str) or '~/.cabinet/log')
+        path_log = pathlib.Path(path_log_str)
+        path_log.mkdir(parents=True, exist_ok=True)
+        self.path_log = path_log_str
 
     def config(self):
         """
@@ -958,20 +961,20 @@ class Cabinet:
         """
         cache = self.update_cache()
 
-        path_export = helpers.resolve_path('~/.cabinet/export')
-        path_export_slash = os.path.join(path_export, '')
+        path_export = pathlib.Path('~/.cabinet/export').expanduser()
 
         # Create the directory if it doesn't exist
-        if not os.path.exists(path_export_slash):
-            os.makedirs(path_export_slash)
+        if not path_export.exists():
+            path_export.mkdir(parents=True)
 
         current_datetime = datetime.now()
         formatted_datetime = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
         file_name = f"cabinet export {formatted_datetime}"
 
-        with open(file_name, 'w', encoding='utf-8') as file:
+        with open(path_export / file_name, 'w', encoding='utf-8') as file:
             file.write(cache or '')
 
+        self.log(f"Exported to {path_export / file_name}")
 
 def main():
     """

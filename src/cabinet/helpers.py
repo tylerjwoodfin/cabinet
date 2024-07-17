@@ -3,15 +3,17 @@ A collection of helper functions
 """
 
 import os
+import pathlib
 
 def resolve_path(path: str) -> str:
     """
-    resolves path aliases and environment variables.
+    Resolves path aliases and environment variables.
 
-    args:
-        path (str): the path to resolve.
+    Args:
+        path (str): The path to resolve.
 
-    returns:
-        the resolved path.
+    Returns:
+        str: The resolved path.
     """
-    return os.path.expanduser(os.path.expandvars(path))
+    expanded_path = os.path.expandvars(path)
+    return str(pathlib.Path(expanded_path).expanduser().resolve())
