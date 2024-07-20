@@ -327,10 +327,6 @@ class Cabinet:
         # Resolve the log path
         path_log_str = helpers.resolve_path(
             self.get('path', 'log', return_type=str) or '~/.cabinet/log')
-
-        if not path_log_str.endswith('/'):
-            path_log_str += '/'
-
         path_log = pathlib.Path(path_log_str)
         path_log.mkdir(parents=True, exist_ok=True)
         self.path_log = path_log_str
@@ -768,7 +764,7 @@ class Cabinet:
             print(f"{' -> '.join(attribute)} removed\n")
 
     def log(self, message: str = '', log_name: str | None = None, level: str | None = None,
-            log_folder_path: str | None = None, is_quiet: bool = False) -> None:
+        log_folder_path: str | None = None, is_quiet: bool = False) -> None:
         """
         Logs a message using the specified log level
         and writes it to a file if a file path is provided.
@@ -826,7 +822,7 @@ class Cabinet:
         # Configure logger
         today = str(date.today())
         log_folder_path = log_folder_path or \
-            f"{self.path_log or self.path_cabinet + '/log/'}{today}"
+            os.path.join(self.path_log or (self.path_cabinet + '/log/'), today)
         log_folder_path = os.path.expanduser(log_folder_path)
 
         if not os.path.exists(log_folder_path):
@@ -845,8 +841,8 @@ class Cabinet:
 
         # File handler for writing complete logs
         file_handler = logging.FileHandler(os.path.join(
-            log_folder_path, f"{log_name}.log"),mode='a')
-        stack = [os.path.basename(filename.filename) for filename in inspect.stack()]
+            log_folder_path, f"{log_name}.log"), mode='a')
+        stack = [os.path.basename(frame.filename) for frame in inspect.stack()]
         stack = list(dict.fromkeys(stack))
         caller_frame_record = ' -> '.join(reversed(stack))
         file_handler.setFormatter(logging.Formatter(
