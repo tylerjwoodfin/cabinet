@@ -284,13 +284,13 @@ cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="/home/{username}/weat
 terminal:
 ```
 # defaults to 'info' if no level is set
-cab -l "Connection timed out" 
+cabinet -l "Connection timed out" 
 
 # -l and --log are interchangeable
-cab --log "Connection timed out"
+cabinet --log "Connection timed out"
 
 # change levels with --level
-cab --log "Server is on fire" --level "critical"
+cabinet --log "Server is on fire" --level "critical"
 ```
 
 ## Disclaimers
