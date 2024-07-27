@@ -13,7 +13,7 @@ jobs:
       - name: Check if PR branch is allowed
         id: check
         run: |
-          if [[ ! "${{ github.head_ref }}" =~ ^release/ ]]; then
+          if [[ "${{ github.base_ref }}" == "main" && ! "${{ github.head_ref }}" =~ ^release/ ]]; then
             echo "Branch ${{ github.head_ref }} is not allowed to merge into main."
             echo "allowed=false" >> $GITHUB_ENV
             exit 1
