@@ -3,9 +3,6 @@ name: Enforce Merge Restrictions
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  push:
-    branches:
-      - '*'
 
 jobs:
   check-branch:
