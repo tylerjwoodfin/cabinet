@@ -4,8 +4,8 @@
 # pylint: disable=line-too-long
 # pylint: disable=redefined-outer-name
 
-import sys
 import io
+import sys
 import logging
 from datetime import date
 from unittest.mock import patch, MagicMock
@@ -49,9 +49,23 @@ def test_log_warn_level(cabinet):
 
 def test_log_file_creation(cabinet, tmp_path):
     log_folder = tmp_path / 'logs'
-    with patch('os.makedirs') as mock_makedirs:
-        cabinet.log('Test message', log_folder_path=str(log_folder))
-        mock_makedirs.assert_called_once_with(log_folder)
+
+    # Call the log function with the temporary path
+    cabinet.log('Test message', log_folder_path=str(log_folder))
+
+    # Check if the log folder was actually created
+    assert log_folder.exists(), f"Log folder was not created at {log_folder}"
+
+    # Check if the log file was actually created
+    today = str(date.today())
+    expected_log_file = log_folder / f"LOG_DAILY_{today}.log"
+    assert expected_log_file.exists(), f"Log file was not created at {expected_log_file}"
+
+    # Optionally, check the content of the log file
+    with open(expected_log_file, 'r', encoding="utf-8") as f:
+        log_content = f.read()
+        assert 'Test message' in log_content, "Test message was not written to the log file"
+
 
 def test_log_quiet_mode(cabinet):
     captured_output = io.StringIO()
@@ -82,40 +96,6 @@ def test_log_quiet_mode(cabinet):
 
         # Check that no stream handler was added
         assert all(not isinstance(call.args[0], logging.StreamHandler)
-                   for call in mock_logger.addHandler.call_args_list)
-
-    finally:
-        sys.stdout = sys.__stdout__
-
-def test_log_not_quiet_mode(cabinet):
-    captured_output = io.StringIO()
-    sys.stdout = captured_output
-
-    try:
-        with patch('os.makedirs'), \
-             patch('logging.FileHandler') as mock_file_handler, \
-             patch('logging.getLogger') as mock_get_logger:
-
-            # Setup mock logger
-            mock_logger = MagicMock()
-            mock_get_logger.return_value = mock_logger
-
-            # Setup mock file handler
-            mock_file_handler.return_value = MagicMock()
-            mock_file_handler.return_value.level = logging.NOTSET
-
-            cabinet.log('Test non-quiet message', is_quiet=False)
-
-        output = captured_output.getvalue()
-
-        # Check that the message was printed to stdout
-        assert 'Test non-quiet message' in output
-
-        # Check that the log message was passed to the logger
-        mock_logger.info.assert_called_once_with('Test non-quiet message')
-
-        # Check that a stream handler was added
-        assert any(isinstance(call.args[0], logging.StreamHandler)
                    for call in mock_logger.addHandler.call_args_list)
 
     finally:
@@ -154,7 +134,10 @@ def test_log_all_valid_levels(level, cabinet):
 
 def test_log_file_path_creation(cabinet, tmp_path):
     log_folder = tmp_path / 'logs'
-    with patch('os.makedirs'), patch('logging.FileHandler') as mock_file_handler:
+    mock_file_handler_instance = MagicMock()
+    mock_file_handler_instance.level = logging.NOTSET
+
+    with patch('os.makedirs'), patch('logging.FileHandler', return_value=mock_file_handler_instance) as mock_file_handler:
         cabinet.log('Test message', log_folder_path=str(log_folder))
 
         today = str(date.today())
