@@ -17,6 +17,9 @@ def cabinet():
     return Cabinet()
 
 def test_log_default_parameters(cabinet):
+    """
+    Test that the default logging parameters use the 'info' level and the default logger name.
+    """
     with patch('os.makedirs'), patch('logging.FileHandler'), patch('logging.getLogger') as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -26,6 +29,9 @@ def test_log_default_parameters(cabinet):
         mock_logger.info.assert_called_once_with('Test message')
 
 def test_log_custom_level(cabinet):
+    """
+    Test that a custom log level (e.g., 'error') is correctly used when logging a message.
+    """
     with patch('os.makedirs'), patch('logging.FileHandler'), patch('logging.getLogger') as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -35,10 +41,16 @@ def test_log_custom_level(cabinet):
         mock_logger.error.assert_called_once_with('Test message')
 
 def test_log_invalid_level(cabinet):
+    """
+    Test that an invalid log level raises a ValueError.
+    """
     with pytest.raises(ValueError):
         cabinet.log('Test message', level='invalid_level')
 
 def test_log_warn_level(cabinet):
+    """
+    Test that the 'warn' level is converted to 'warning' and used correctly.
+    """
     with patch('os.makedirs'), patch('logging.FileHandler'), patch('logging.getLogger') as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -48,6 +60,9 @@ def test_log_warn_level(cabinet):
         mock_logger.warning.assert_called_once_with('Test message')
 
 def test_log_file_creation(cabinet, tmp_path):
+    """
+    Test that a log file is created in the specified log folder path.
+    """
     log_folder = tmp_path / 'logs'
 
     # Call the log function with the temporary path
@@ -66,8 +81,10 @@ def test_log_file_creation(cabinet, tmp_path):
         log_content = f.read()
         assert 'Test message' in log_content, "Test message was not written to the log file"
 
-
 def test_log_quiet_mode(cabinet):
+    """
+    Test that when 'is_quiet' is True, no output is printed to stdout and no stream handler is added.
+    """
     captured_output = io.StringIO()
     sys.stdout = captured_output
 
@@ -102,6 +119,9 @@ def test_log_quiet_mode(cabinet):
         sys.stdout = sys.__stdout__
 
 def test_log_custom_log_name(cabinet):
+    """
+    Test that a custom logger name is used if provided.
+    """
     with patch('os.makedirs'), patch('logging.FileHandler'), patch('logging.getLogger') as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -111,6 +131,9 @@ def test_log_custom_log_name(cabinet):
         mock_get_logger.assert_called_once_with('custom_log')
 
 def test_log_default_log_name(cabinet):
+    """
+    Test that the default log name uses the 'LOG_DAILY_' prefix and the current date.
+    """
     with patch('os.makedirs'), patch('logging.FileHandler'), patch('logging.getLogger') as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -124,6 +147,9 @@ def test_log_default_log_name(cabinet):
 
 @pytest.mark.parametrize("level", ['debug', 'info', 'warning', 'error', 'critical'])
 def test_log_all_valid_levels(level, cabinet):
+    """
+    Test that all valid log levels ('debug', 'info', 'warning', 'error', 'critical') are correctly used.
+    """
     with patch('os.makedirs'), patch('logging.FileHandler'), patch('logging.getLogger') as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -133,6 +159,9 @@ def test_log_all_valid_levels(level, cabinet):
         getattr(mock_logger, level).assert_called_once_with('Test message')
 
 def test_log_file_path_creation(cabinet, tmp_path):
+    """
+    Test that the FileHandler is created with the correct file path based on the provided log folder path.
+    """
     log_folder = tmp_path / 'logs'
     mock_file_handler_instance = MagicMock()
     mock_file_handler_instance.level = logging.NOTSET
