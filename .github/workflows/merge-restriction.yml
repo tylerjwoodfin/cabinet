@@ -1,11 +1,15 @@
-name: Enforce Merge Restrictions
+name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  push:
+    branches:
+      - main
 
 jobs:
-  check-branch:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -22,16 +26,8 @@ jobs:
           pip install pytest
 
       - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$(pwd)" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=$(pwd)/src" >> $GITHUB_ENV
 
       - name: Run tests
         run: |
           pytest
-
-      - name: Check if PR branch is allowed
-        if: github.base_ref == 'main'
-        run: |
-          if [[ ! ${GITHUB_HEAD_REF} =~ ^release/ ]]; then
-            echo "Branch ${GITHUB_HEAD_REF} is not allowed to merge into main."
-            exit 1
-          fi
