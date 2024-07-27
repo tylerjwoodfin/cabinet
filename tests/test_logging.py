@@ -5,15 +5,47 @@
 # pylint: disable=redefined-outer-name
 
 import io
+import os
 import sys
+import json
 import logging
 from datetime import date
 from unittest.mock import patch, MagicMock
 import pytest
 from cabinet import Cabinet
 
+@pytest.fixture(scope='function')
+def mock_config():
+    # Define the mock configuration data
+    mock_data = {
+        "mongodb_username": "fake_user",
+        "mongodb_password": "fake_pass",
+        "mongodb_cluster_name": "fake_cluster",
+        "mongodb_db_name": "fake_db",
+        "path_cabinet": "fake_path",
+        "editor": "nvim"
+    }
+
+    # Define the path where the mock config should be created
+    config_path = os.path.expanduser('~/.config/cabinet/config.json')
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+    # Write the mock configuration to the file
+    with open(config_path, 'w', encoding="utf-8") as f:
+        json.dump(mock_data, f, indent=4)
+
+    # Yield to the test
+    yield
+
+    # Cleanup after test (optional, if you want to remove the file after the test)
+    if os.path.exists(config_path):
+        os.remove(config_path)
+
 @pytest.fixture
-def cabinet():
+def cabinet(mock_config):
+    # Create a Cabinet instance with the mock configuration
     return Cabinet()
 
 def test_log_default_parameters(cabinet):
