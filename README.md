@@ -29,6 +29,7 @@ Supports a cli, email, and event logging.
 ```bash
   python3 -m pip install cabinet
   python3 -m pip install pymongo
+  python3 -m pip install prompt_toolkit
   cabinet --config
 ```
 
@@ -229,7 +230,7 @@ terminal:
 # assumes path -> edit -> shopping -> path/to/shopping.md has been set
 cabinet -ef shoppping
 
-or 
+or
 
 cabinet -ef "/path/to/shopping.md"
 ```
@@ -284,7 +285,7 @@ cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="/home/{username}/weat
 terminal:
 ```
 # defaults to 'info' if no level is set
-cabinet -l "Connection timed out" 
+cabinet -l "Connection timed out"
 
 # -l and --log are interchangeable
 cabinet --log "Connection timed out"
