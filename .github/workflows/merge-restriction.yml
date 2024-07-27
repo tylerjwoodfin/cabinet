@@ -15,10 +15,10 @@ jobs:
         run: |
           if [[ "${{ github.base_ref }}" == "main" && ! "${{ github.head_ref }}" =~ ^release/ ]]; then
             echo "Branch ${{ github.head_ref }} is not allowed to merge into main."
-            echo "allowed=false" >> $GITHUB_ENV
+            echo "::set-output name=allowed::false"
             exit 1
           else
-            echo "allowed=true" >> $GITHUB_ENV
+            echo "::set-output name=allowed::true"
           fi
 
   test:
