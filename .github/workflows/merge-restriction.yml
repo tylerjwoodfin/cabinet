@@ -7,12 +7,16 @@ on:
 jobs:
   check-branch:
     runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
     steps:
       - name: Check if PR branch is allowed
-        if: github.base_ref == 'main'
+        id: check
         run: |
-          if [[ ! ${GITHUB_HEAD_REF} =~ ^release/ ]]; then
-            echo "Branch ${GITHUB_HEAD_REF} is not allowed to merge into main."
+          if [[ "${{ github.base_ref }}" == "main" && ! "${{ github.head_ref }}" =~ ^release/ ]]; then
+            echo "Branch ${{ github.head_ref }} is not allowed to merge into main."
+            echo "::set-output name=allowed::false"
             exit 1
+          else
+            echo "::set-output name=allowed::true"
           fi
-
