@@ -262,7 +262,7 @@ class Cabinet:
 
         Notes:
             - The configuration is read from ~/.config/cabinet/config.json.
-            - If 'path_cabinet' is not provided in the function call or 
+            - If 'path_cabinet' is not provided in the function call or
                 in the config.json file, the default location is '~/.cabinet'.
             - The attributes of the Cabinet instance are set based on the configuration values.
 
@@ -393,7 +393,7 @@ class Cabinet:
         """
         Writes all MongoDB data to a cache file for faster reads in most situations.
         Creates the cache file if it does not exist.
-        
+
         Args:
             - path (str): full path, including filename, of cache.json
             - force (bool): update cache regardless of how  old cache file is.
@@ -1087,7 +1087,8 @@ def main():
         if args.to_addr:
             to_addr = ''.join(args.to_addr).split(',')
         Mail().send(args.subject, args.body, to_addr=to_addr)
-
+    else:
+        parser.print_help()
 
 if __name__ == "__main__":
     main()
