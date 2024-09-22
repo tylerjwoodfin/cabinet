@@ -22,7 +22,7 @@ Supports a cli, email, and event logging.
   - cache is written when retrieving data.
   - if cache is older than 1 hour, it is refreshed; otherwise, data is pulled from cache by default
 - Logs are written to `~/.cabinet/log/LOG_DAILY_YYYY-MM-DD` by default
-  - this can be changed as needed (per log or otherwise)
+  - You can change this to something other than `~/.cabinet/log` as needed by setting/modifying `~/.config/cabinet/config.json` -> `path_dir_log`
 
 ## Installation and Setup
 
@@ -265,7 +265,9 @@ from cabinet import Cabinet
 
 cab = Cabinet()
 
-# writes to a file named LOG_DAILY_YYYY-MM-DD in the default log folder (or cab.get('path', 'log')) inside a YYYY-MM-DD folder
+# writes to a file named LOG_DAILY_YYYY-MM-DD in `~/.cabinet/log` inside a YYYY-MM-DD folder
+# writes somewhere other than `~/.cabinet/log`, if `~/.config/cabinet/config.json` has `path_dir_log` set
+
 cab.log("Connection timed out") # defaults to 'info' if no level is set
 cab.log("This function hit a breakpoint", level="debug")
 cab.log("Looks like the server is on fire", level="critical")

@@ -2,8 +2,6 @@
 Messages found throughout Cabinet
 """
 
-import pathlib
-
 NEW_SETUP_MSG_INTRO = """
 Welcome to Cabinet!
 
@@ -49,12 +47,9 @@ CONFIG_MONGODB_DB_NAME = """
 Enter your MongoDB database name:\n
 """
 
-CONFIG_PATH_CABINET = f"""
-Enter the full path where you would like to store Cabinet data,
-such as logs and settings.
-
-\n
-Default: {pathlib.Path.home().resolve()}/.cabinet
+CONFIG_PATH_DIR_LOG = """
+Enter the full path where you would like to store Cabinet logs.
+(default: ~/.cabinet/log)\n
 """
 
 CONFIG_EDITOR: str = """
@@ -73,8 +68,8 @@ Cabinet could not initialize properly.
 
 Please check that all values in the configuration file are correct:
 mongodb_enabled
-path_cabinet
 editor
+path_dir_log (optional)
 mongodb_username
 mongodb_password
 mongodb_cluster_name
@@ -90,12 +85,12 @@ Cabinet could not initialize properly- some values appear to be missing.
 
 Please check that all values in the configuration file exist and are properly set:
 mongodb_enabled
-path_cabinet
 editor
-mongodb_username (if MongoDB is enabled)
-mongodb_password (if MongoDB is enabled)
-mongodb_cluster_name (if MongoDB is enabled)
-mongodb_db_name (if MongoDB is enabled)
+path_dir_log (optional)
+mongodb_username (if mongodb_enabled is 'true')
+mongodb_password (if mongodb_enabled is 'true')
+mongodb_cluster_name (if mongodb_enabled is 'true')
+mongodb_db_name (if mongodb_enabled is 'true')
 
 Press Enter to open the file. Update any invalid values and try again.\n
 """

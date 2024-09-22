@@ -42,7 +42,7 @@ from .constants import (
     CONFIG_MONGODB_PASSWORD,
     CONFIG_MONGODB_CLUSTER_NAME,
     CONFIG_MONGODB_DB_NAME,
-    CONFIG_PATH_CABINET,
+    CONFIG_PATH_DIR_LOG,
     CONFIG_EDITOR,
     EDIT_FILE_DEFAULT,
     ERROR_CONFIG_MISSING_VALUES,
@@ -73,18 +73,18 @@ class Cabinet:
     database: Database
     path_dir_config = helpers.resolve_path("~/.config/cabinet")
     path_dir_cabinet: str = helpers.resolve_path("~/.cabinet")
+    path_dir_log: str = f"{path_dir_cabinet}/log"
     path_file_config: str = f"{path_dir_config}/config.json"
     path_file_cache: str = f"{path_dir_config}/cache.json"
     path_file_data: str = f"{path_dir_cabinet}/data.json"
-    path_cabinet: str = ''
     editor: str = 'nano'
-    path_log: str = ''
     cached_data: dict = {}
     is_new_setup: bool = False
 
     def _get_config(self, key=None, warn_missing=True):
         """
         Retrieves the value associated with the specified key from the configuration file.
+        The configuration file is located at ~/.config/cabinet/config.json.
 
         Args:
             key (str): The key to retrieve the corresponding value.
@@ -101,17 +101,6 @@ class Cabinet:
             JSONDecodeError: If there is a problem decoding the JSON data in the configuration file.
 
         Notes:
-            If the key is 'mongodb_username' and the configuration file is not found,
-            the user will be prompted to set up a new configuration.
-            The value for 'mongodb_username' will be obtained
-            from the user input.
-
-            If the key is 'mongodb_password', 'mongodb_cluster_name',
-            'mongodb_db_name', or 'path_cabinet'
-            and the is_new_setup flag is True, the user will be prompted to
-            enter the corresponding value
-            for the new configuration.
-
             If the JSON data in the configuration file is not valid,
             the user will be given the option
             to overwrite the file with an empty dictionary or fix the file manually.
@@ -153,9 +142,8 @@ class Cabinet:
                 value = input(CONFIG_MONGODB_CLUSTER_NAME)
             if key == 'mongodb_db_name':
                 value = input(CONFIG_MONGODB_DB_NAME)
-            if key == 'path_cabinet':
-                value = input(CONFIG_PATH_CABINET) \
-                    or helpers.resolve_path("~/.cabinet")
+            if key == 'path_dir_log':
+                value = input(CONFIG_PATH_DIR_LOG) or "~/.cabinet/log"
             if key == 'editor':
                 value = get_editor()
 
@@ -213,7 +201,8 @@ class Cabinet:
 
     def _put_config(self, key: str | None = None, value: Any | None = None) -> Any | None:
         """
-        Updates the internal configuration file with a new key-value pair.
+        Updates the configuration file at ~/.config/cabinet/config.json with
+        the specified key-value pair.
 
         Args:
             key (str): The key for the configuration setting.
@@ -269,17 +258,13 @@ class Cabinet:
                 print(message)
             return message
 
-    def __init__(self, path_cabinet: str | None = None):
+    def __init__(self):
         """
         Initializes the Cabinet instance with the provided or default configuration.
 
-        Args:
-            path_cabinet (str, optional): The path to the cabinet directory. Defaults to None.
-
         Notes:
             - The configuration is read from ~/.config/cabinet/config.json.
-            - If 'path_cabinet' is not provided in the function call or
-            in the config.json file, the default location is '~/.cabinet'.
+            - Data is stored in ~/.cabinet/data.json (local) or MongoDB (remote).
             - The attributes of the Cabinet instance are set based on the configuration values.
 
         Raises:
@@ -293,14 +278,7 @@ class Cabinet:
 
         """
 
-        if path_cabinet is not None:
-            self.path_cabinet = path_cabinet
-        else:
-            config_path = self._get_config('path_cabinet') or "~/.cabinet"
-            self.path_cabinet = helpers.resolve_path(config_path)
-
-        # these should match class attributes above
-        keys = ["mongodb_enabled", "path_cabinet", "editor"]
+        keys = ["mongodb_enabled", "editor", "path_dir_log"]
 
         # for compatibility, set mongodb_enabled to True if all MongoDB keys are present
         if all(self._get_config(key, warn_missing=False) for key in keys[1:]):
@@ -314,12 +292,16 @@ class Cabinet:
                          "mongodb_cluster_name", "mongodb_db_name"])
 
         for key in keys:
-            if key == 'path_cabinet' and path_cabinet is not None:
-                continue
             value = self._get_config(key, warn_missing=False)
+
+            # path_dir_log is optional and defaults to ~/.cabinet/log if unset
+            if key == "path_dir_log" and value == "":
+                continue
+
             setattr(self, key, value)
 
         # check for missing relevant keys
+        keys.remove("path_dir_log")
         if any(getattr(self, key) is None or getattr(self, key) == '' for key in keys):
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
@@ -385,12 +367,9 @@ class Cabinet:
                     self.log(f"Failed to create data file: {str(e)}", level="error")
                     raise
 
-        # Resolve the log path
-        path_log_str = helpers.resolve_path(
-            self.get('path', 'log', return_type=str) or '~/.cabinet/log')
-        path_log = pathlib.Path(path_log_str)
-        path_log.mkdir(parents=True, exist_ok=True)
-        self.path_log = path_log_str
+        # verify path_dir_log exists
+        if not os.path.exists(self.path_dir_log):
+            os.makedirs(self.path_dir_log)
 
     def config(self):
         """
@@ -896,7 +875,7 @@ class Cabinet:
         # Configure logger
         today = str(date.today())
         log_folder_path = log_folder_path or \
-            os.path.join(self.path_log or (self.path_cabinet + '/log/'), today)
+            os.path.join(self.path_dir_log, today)
         log_folder_path = os.path.expanduser(log_folder_path)
 
         if not os.path.exists(log_folder_path):
@@ -941,7 +920,7 @@ class Cabinet:
         Args:
             - file_name (str): The filename to read.
             - file_path (str, optional): The path to the directory containing the file.
-                If None, the default path is used.
+                If None, ~/.cabinet is used.
             - strip (bool, optional): Whether to strip the lines of whitespace characters
                 On by default.
             - ignore_not_found (bool, optional): Whether to return None when the file is not found.
@@ -952,7 +931,7 @@ class Cabinet:
         """
 
         if not file_path:
-            file_path = self.path_log
+            file_path = self.path_dir_cabinet
         elif file_path == "notes":
             file_path = self.get('path', 'notes') or "~/.cabinet/notes"
 
@@ -996,10 +975,11 @@ class Cabinet:
         try:
             # Handle default file path and notes alias
             if not path_file:
-                path_file = helpers.resolve_path(self.path_log or '~/.cabinet/log')
+                path_file = helpers.resolve_path(self.path_dir_log)
             elif path_file == "notes":
                 path_notes: str = self.get('path', 'notes', return_type=str) or ''
-                path_file = helpers.resolve_path(path_notes or self.path_log or '~/.cabinet/notes')
+                path_file = helpers.resolve_path(
+                    path_notes or self.path_dir_log or '~/.cabinet/notes')
 
             # Create directory if it does not exist
             os.makedirs(path_file, exist_ok=True)
