@@ -1,24 +1,27 @@
 # cabinet
-A Python library to easily manage data with MongoDB and across other files.
-Supports a cli, email, and event logging.
+A CLI and Python library to easily manage data and logging.
+Supports email and event logging.
 
 ## Features
 
-- Read and write data in MongoDB and/or the JSON files of your choice
-- Provides easy shortcuts to MongoDB actions
+- More easily access your data across multiple projects
+- More easily log messages to the file of your choice
+- Edit MongoDB as though it were a JSON file
 - Log to a file/directory of your choice without having to configure `logger` each time
 - Send/receive mail using `cabinet.Cabinet().mail()`
 
 ## Dependencies
 
 - Python >= 3.6
-- MongoDB
+- MongoDB (optional)
 - Pymongo (`pip install pymongo`)
+- Prompt_toolkit (`pip install prompt_toolkit`)
 - smtplib
 
 ## Structure
 
-- Data is stored in MongoDB; simply plug in your credentials.
+- Data is stored in `~/.cabinet/data.json` or MongoDB
+  - data from MongoDB is interacted with as if it were a JSON file
   - cache is written when retrieving data.
   - if cache is older than 1 hour, it is refreshed; otherwise, data is pulled from cache by default
 - Logs are written to `~/.cabinet/log/LOG_DAILY_YYYY-MM-DD` by default
@@ -27,9 +30,9 @@ Supports a cli, email, and event logging.
 ## Installation and Setup
 
 ```bash
-  python3 -m pip install cabinet
-  python3 -m pip install pymongo
-  python3 -m pip install prompt_toolkit
+  pip install cabinet
+  pip install pymongo
+  pip install prompt_toolkit
   cabinet --config
 ```
 
