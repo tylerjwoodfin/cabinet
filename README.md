@@ -8,7 +8,7 @@ Supports email and event logging.
 - More easily log messages to the file of your choice
 - Edit MongoDB as though it were a JSON file
 - Log to a file/directory of your choice without having to configure `logger` each time
-- Send/receive mail using `cabinet.Cabinet().mail()`
+- Easily send mail from the terminal
 
 ## Dependencies
 
@@ -107,9 +107,9 @@ cabinet -p edit todo value "/home/{username}/path/to/whatever.md"
 
 ### mail
 
-- It is NEVER a good idea to store your password in plaintext; for this reason, I strongly recommend a "throwaway" account that is only used for sending emails
-- Gmail (as of May 2022) and most other mainstream email providers won't work with this; for support, search for sending mail from your email provider with `smtplib`.
-- In MongoDB, add the `email` object to make your settings file look like this example:
+- It is NEVER a good idea to store your password openly either locally or in MongoDB; for this reason, I recommend a "throwaway" account that is only used for sending emails, such as a custom domain email.
+- Gmail and most other mainstream email providers won't work with this; for support, search for sending mail from your email provider with `smtplib`.
+- In Cabinet (`cabinet -e`), add the `email` object to make your settings file look like this example:
 
 file:
 ```
@@ -276,7 +276,7 @@ cab.log("This function hit a breakpoint", level="debug")
 cab.log("Looks like the server is on fire", level="critical")
 cab.log("This is fine", level="info")
 
-# writes to a file named LOG_TEMPERATURE
+# writes to a file named LOG_TEMPERATURE in the default log directory
 cab.log("30", log_name="LOG_TEMPERATURE")
 
 # writes to a file named LOG_TEMPERATURE in /home/{username}/weather
@@ -304,11 +304,9 @@ cabinet --log "Server is on fire" --level "critical"
 - Although I've done quite a bit of testing, I can't guarantee everything that works on my machine will work on yours. Always back up your data to multiple places to avoid data loss.
 - If you find any issues, please contact me... or get your hands dirty and raise a PR!
 
-## Unit Tests
-- Unit tests are available in `test/`; use `pytest test/` to run them.
-
 ## Author
 
 - Tyler Woodfin
   - [GitHub](https://www.github.com/tylerjwoodfin)
+  - [LinkedIn](https://www.linkedin.com/in/tylerjwoodfin)
   - [Website](http://tyler.cloud)
