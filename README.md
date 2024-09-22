@@ -176,7 +176,7 @@ or terminal:
 ```
 cabinet -g employee Tyler salary
 ```
-- optional: `--no-cache` to force cache refresh
+- optional: `--force-cache-update` to force a cache update
 
 results in:
 ```

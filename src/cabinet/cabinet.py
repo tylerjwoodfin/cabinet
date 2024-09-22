@@ -36,6 +36,7 @@ from bson import json_util, ObjectId
 from . import helpers
 from .constants import (
     NEW_SETUP_MSG_INTRO,
+    NEW_SETUP_MSG_CHECK_MONGODB,
     NEW_SETUP_MSG_MONGODB_INSTRUCTIONS,
     CONFIG_MONGODB_USERNAME,
     CONFIG_MONGODB_PASSWORD,
@@ -46,11 +47,13 @@ from .constants import (
     EDIT_FILE_DEFAULT,
     ERROR_CONFIG_MISSING_VALUES,
     ERROR_CONFIG_JSON_DECODE,
-    ERROR_CONFIG_FILE_INVALID,
+    ERROR_CONFIG_FILE_INVALID_MONGODB,
     ERROR_CONFIG_INVALID_EDITOR,
     ERROR_CONFIG_BROKEN_EDITOR,
+    ERROR_LOCAL_STORAGE_JSON_DECODE,
     ERROR_MONGODB_TIMEOUT,
-    ERROR_MONGODB_DNS
+    ERROR_MONGODB_DNS,
+    WARN_LOCAL_STORAGE_PATH,
 )
 from .mail import Mail
 
@@ -60,6 +63,7 @@ class Cabinet:
     Cabinet class
     """
 
+    mongodb_enabled: bool = False
     mongodb_username: str = ''
     mongodb_password: str = ''
     mongodb_cluster_name: str = ''
@@ -67,15 +71,18 @@ class Cabinet:
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
-    path_config_dir = helpers.resolve_path("~/.config/cabinet")
-    path_config_file = f"{path_config_dir}/config.json"
+    path_dir_config = helpers.resolve_path("~/.config/cabinet")
+    path_dir_cabinet: str = helpers.resolve_path("~/.cabinet")
+    path_file_config: str = f"{path_dir_config}/config.json"
+    path_file_cache: str = f"{path_dir_config}/cache.json"
+    path_file_data: str = f"{path_dir_cabinet}/data.json"
     path_cabinet: str = ''
     editor: str = 'nano'
     path_log: str = ''
     cached_data: dict = {}
     is_new_setup: bool = False
 
-    def _get_config(self, key=None):
+    def _get_config(self, key=None, warn_missing=True):
         """
         Retrieves the value associated with the specified key from the configuration file.
 
@@ -158,7 +165,7 @@ class Cabinet:
             return value
 
         try:
-            with open(self.path_config_file, 'r+', encoding="utf8") as file:
+            with open(self.path_file_config, 'r+', encoding="utf8") as file:
                 return json.load(file)[key]
         except FileNotFoundError:
             # setup
@@ -169,56 +176,65 @@ class Cabinet:
             if not pathlib.Path(path_cabinet).exists():
                 os.makedirs(path_cabinet)
 
-            has_mongodb = input(NEW_SETUP_MSG_INTRO)
+            while True:
+                storage_type = input(NEW_SETUP_MSG_INTRO).strip()
+                if storage_type in {'1', '2'}:
+                    break
+                print("Please enter 1 or 2.")
 
-            if not has_mongodb.lower().startswith('y'):
-                input(NEW_SETUP_MSG_MONGODB_INSTRUCTIONS)
+            if storage_type == "1":
+                if input(NEW_SETUP_MSG_CHECK_MONGODB).lower().startswith("y"):
+                    self._put_config("mongodb_enabled", True)
+                else:
+                    print(NEW_SETUP_MSG_MONGODB_INSTRUCTIONS)
+            elif storage_type == "2":
+                self._put_config("mongodb_enabled", False)
 
             return config_prompts(key)
         except KeyError:
             if self.is_new_setup:
                 return config_prompts(key)
-            else:
+            elif warn_missing:
                 print(
-                    f"Warning: Could not find {key} in {self.path_config_file}")
+                    f"Warning: Could not find {key} in {self.path_file_config}")
             return ""
         except json.decoder.JSONDecodeError:
-            err_msg = f"Problem reading {self.path_config_file}.\n\n{ERROR_CONFIG_JSON_DECODE}"
+            err_msg = f"Problem reading {self.path_file_config}.\n\n{ERROR_CONFIG_JSON_DECODE}"
             response = input(err_msg)
 
             if response.lower().startswith("y"):
-                with open(self.path_config_file, 'w+', encoding="utf8") as file:
+                with open(self.path_file_config, 'w+', encoding="utf8") as file:
                     file.write('{}')
                 print("Done. Please try again.")
             else:
-                print(f"OK. Please fix {self.path_config_file} and try again.")
+                print(f"OK. Please fix {self.path_file_config} and try again.")
 
             sys.exit(-1)
 
-    def _put_config(self, key: str | None = None, value: str | None = None) -> str | None:
+    def _put_config(self, key: str | None = None, value: Any | None = None) -> Any | None:
         """
         Updates the internal configuration file with a new key-value pair.
 
         Args:
             key (str): The key for the configuration setting.
-            value (str): The value for the configuration setting.
+            value (Any): The value for the configuration setting (JSON-compatible).
 
         Returns:
-            str: The updated value for the configuration setting.
+            Any: The updated value for the configuration setting.
 
         Raises:
             FileNotFoundError: If the configuration file cannot be found.
         """
 
-        if value == "":
+        if value is None:
             print("No changes were made.")
             sys.exit(1)
 
         try:
-            with open(self.path_config_file, 'r+', encoding="utf8") as file:
+            with open(self.path_file_config, 'r+', encoding="utf8") as file:
                 config = json.load(file)
         except FileNotFoundError:
-            with open(self.path_config_file, 'x+', encoding="utf8") as file:
+            with open(self.path_file_config, 'x+', encoding="utf8") as file:
                 self._ifprint(
                     "Note: Could not find an existing config file; creating a new one.",
                     self.is_new_setup is False)
@@ -227,11 +243,11 @@ class Cabinet:
 
         config[key] = value
 
-        with open(self.path_config_file, 'w+', encoding="utf8") as file:
+        with open(self.path_file_config, 'w+', encoding="utf8") as file:
             json.dump(config, file, indent=4)
 
-        print(f"\nUpdated configuration file ({self.path_config_file}).")
-        self._ifprint(f"{key} is now {value}\n", self.is_new_setup is False)
+        print(f"\nUpdated configuration file ({self.path_file_config}).")
+        self._ifprint(f"{key} is now {json.dumps(value)}\n", self.is_new_setup is False)
 
         return value
 
@@ -263,7 +279,7 @@ class Cabinet:
         Notes:
             - The configuration is read from ~/.config/cabinet/config.json.
             - If 'path_cabinet' is not provided in the function call or
-                in the config.json file, the default location is '~/.cabinet'.
+            in the config.json file, the default location is '~/.cabinet'.
             - The attributes of the Cabinet instance are set based on the configuration values.
 
         Raises:
@@ -284,16 +300,26 @@ class Cabinet:
             self.path_cabinet = helpers.resolve_path(config_path)
 
         # these should match class attributes above
-        keys = ["mongodb_username", "mongodb_password",
-                "mongodb_cluster_name", "mongodb_db_name", "path_cabinet",
-                "editor"]
+        keys = ["mongodb_enabled", "path_cabinet", "editor"]
+
+        # for compatibility, set mongodb_enabled to True if all MongoDB keys are present
+        if all(self._get_config(key, warn_missing=False) for key in keys[1:]):
+            if self._get_config("mongodb_enabled", warn_missing=False) == '':
+                self._put_config("mongodb_enabled", True)
+                self.mongodb_enabled = True
+
+        # If MongoDB is enabled, include MongoDB-specific keys in the check
+        if self._get_config("mongodb_enabled", warn_missing=False) or False:
+            keys.extend(["mongodb_username", "mongodb_password",
+                         "mongodb_cluster_name", "mongodb_db_name"])
 
         for key in keys:
             if key == 'path_cabinet' and path_cabinet is not None:
                 continue
-            value = self._get_config(key)
+            value = self._get_config(key, warn_missing=False)
             setattr(self, key, value)
 
+        # check for missing relevant keys
         if any(getattr(self, key) is None or getattr(self, key) == '' for key in keys):
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
@@ -301,28 +327,63 @@ class Cabinet:
 
         self.is_new_setup = False
 
-        try:
-            self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
-                        f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
-                        f"{self.mongodb_db_name}?retryWrites=true&w=majority")
-            self.client = MongoClient(self.uri, server_api=ServerApi('1'))
-            self.database = self.client[self.mongodb_db_name]
-            if self.database is None:
-                self.log("Database cannot be initialized", level="error")
-                return None
-        except pymongo.errors.InvalidURI as error:
-            print(ERROR_CONFIG_FILE_INVALID)
-            print(error._message)
-            sys.exit(-1)
-        except pymongo.errors.ServerSelectionTimeoutError as error:
-            print(ERROR_MONGODB_TIMEOUT)
-            print(error)
-            sys.exit(-1)
-        except pymongo.errors.ConfigurationError as error:
-            print(ERROR_MONGODB_DNS)
-            print(error)
-            sys.exit(-1)
+        # Check if MongoDB is enabled
+        if self.mongodb_enabled:
+            try:
+                self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
+                            f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
+                            f"{self.mongodb_db_name}?retryWrites=true&w=majority")
+                self.client = MongoClient(self.uri, server_api=ServerApi('1'))
+                self.database = self.client[self.mongodb_db_name]
+                if self.database is None:
+                    self.log("Database cannot be initialized", level="error")
+                    return None
+            except pymongo.errors.InvalidURI as error:
+                print(ERROR_CONFIG_FILE_INVALID_MONGODB)
+                print(error._message)
+                sys.exit(-1)
+            except pymongo.errors.ServerSelectionTimeoutError as error:
+                print(ERROR_MONGODB_TIMEOUT)
+                print(error)
+                sys.exit(-1)
+            except pymongo.errors.ConfigurationError as error:
+                print(ERROR_MONGODB_DNS)
+                print(error)
+                sys.exit(-1)
+        else:
+            # Resolve local storage path (~/.cabinet/data.json)
 
+            # Load cached data from local JSON file
+            if os.path.exists(self.path_file_data):
+                try:
+                    with open(self.path_file_data, 'r', encoding='utf-8') as data_file:
+                        self.cached_data = json.load(data_file)
+                except json.decoder.JSONDecodeError:
+                    err_msg = f"Problem reading {self.path_file_data}.\n\n"
+                    err_msg += f"{ERROR_LOCAL_STORAGE_JSON_DECODE}"
+                    response = input(err_msg)
+
+                    if response.lower().startswith("y"):
+                        with open(self.path_file_data, 'w+', encoding="utf8") as file:
+                            file.write('{}')
+                        print("Done. Please try again.")
+                    else:
+                        print(f"OK. Please fix {self.path_file_data} and try again.")
+
+                    sys.exit(-1)
+            else:
+                self.log(WARN_LOCAL_STORAGE_PATH, level="warn")
+                # require user to press enter to continue
+                input()
+                try:
+                    # Attempt to create the missing file
+                    with open(self.path_file_data, 'w+', encoding="utf8") as file:
+                        file.write('{}')
+                    self.log("New data file created successfully.", level="info", is_quiet=True)
+                except IOError as e:
+                    # Handle potential file creation errors
+                    self.log(f"Failed to create data file: {str(e)}", level="error")
+                    raise
 
         # Resolve the log path
         path_log_str = helpers.resolve_path(
@@ -372,22 +433,22 @@ class Cabinet:
             # User is in a terminal, open with default editor
             try:
                 subprocess.run(
-                    [os.environ.get('EDITOR', 'vi'), self.path_config_file], check=True)
+                    [os.environ.get('EDITOR', 'vi'), self.path_file_config], check=True)
             except FileNotFoundError:
                 print("Default editor not found. Unable to open the file.")
         else:
             if sys.platform.startswith('win32'):
                 # Windows
                 subprocess.run(
-                    ['start', '', self.path_config_file], shell=True, check=True)
+                    ['start', '', self.path_file_config], shell=True, check=True)
             elif sys.platform.startswith('darwin'):
                 # macOS
-                subprocess.run(['open', self.path_config_file], check=True)
+                subprocess.run(['open', self.path_file_config], check=True)
             elif sys.platform.startswith('linux'):
                 # Linux
-                subprocess.run(['xdg-open', self.path_config_file], check=True)
+                subprocess.run(['xdg-open', self.path_file_config], check=True)
             else:
-                print(f"Please edit ${self.path_config_file} to configure.")
+                print(f"Please edit ${self.path_file_config} to configure.")
 
     def update_cache(self, path: str | None = None, force: bool = False) -> str | None:
         """
@@ -403,7 +464,7 @@ class Cabinet:
         force_update: bool =  force or inspect.stack()[1].function == 'put'
 
         if path is None:
-            path = f"{self.path_config_dir}/cache.json"
+            path = self.path_file_cache
 
         # Check if cache file exists and is less than 1 hour old
         if not force_update and os.path.exists(path):
@@ -429,22 +490,31 @@ class Cabinet:
 
         return json_data
 
-    def edit_db(self):
+    def edit_cabinet(self):
         """
         Opens the data in self.database.cabinet within a JSON file in
         Nano (default) or the editor specified in `cabinet --config` -> `editor`.
         When the file is closed, it replaces the data in this collection in MongoDB.
         """
-        path_cache_file = f"{self.path_config_dir}/cache.json"
-        json_data = self.update_cache(path_cache_file, force=True)
+
+        # handle local storage
+        if not self.mongodb_enabled:
+            # open path_data_json if it exists; otherwise, display a warning
+            if not os.path.exists(self.path_file_data):
+                self.log(WARN_LOCAL_STORAGE_PATH, level="warn")
+                return
+            subprocess.run([self.editor, self.path_file_data], check=True)
+            return
+
+        json_data = self.update_cache(self.path_file_cache, force=True)
 
         try:
 
             # Edit the cache file
-            subprocess.run([self.editor, path_cache_file], check=True)
+            subprocess.run([self.editor, self.path_file_cache], check=True)
 
             # Read the modified JSON data from the cache
-            with open(path_cache_file, "r", encoding="utf-8") as file_cache:
+            with open(self.path_file_cache, "r", encoding="utf-8") as file_cache:
                 modified_json_data = file_cache.read()
 
             # Check if any changes were made
@@ -472,13 +542,13 @@ class Cabinet:
                          level="error")
                 self._put_config("editor", "nano")
             else:
-                print(f"Error: Cache file not found in {path_cache_file}, even after updating.")
+                print(f"Error: Cache file not found in {self.path_file_cache} after cache update.")
         except subprocess.CalledProcessError:
             print(f"Error: Failed to open the file in '{self.editor}'.")
         except json.JSONDecodeError:
             self.log("Failed to parse the modified JSON data.", level="error")
             self.log("Refreshing cache with original data.", level="info")
-            self.write_file('cache.json', self.path_config_dir, json_data)
+            self.write_file('cache.json', self.path_dir_config, json_data)
         except Exception as error:  # pylint: disable=W0703
             print(f"Error: {str(error)}")
 
@@ -509,7 +579,7 @@ class Cabinet:
             path = input(EDIT_FILE_DEFAULT)
 
             if path == "":
-                self.edit_db()
+                self.edit_cabinet()
                 return
 
             self.edit_file(path)
@@ -643,7 +713,7 @@ class Cabinet:
 
     T = TypeVar('T', bound=Any)  # Generic type variable for return_type
     def get(self, *attributes, warn_missing: bool = False, is_print: bool = False,
-            no_cache: bool = False, return_type: Optional[Type[T]] = None) -> Optional[T]:
+            force_cache_update: bool = False, return_type: Optional[Type[T]] = None) -> Optional[T]:
         """
         Returns a property or properties from MongoDB based on the input attributes,
         using a cache file to improve performance.
@@ -652,7 +722,7 @@ class Cabinet:
             *attributes (str): A sequence of strings representing nested attributes.
             warn_missing (bool, optional): Whether to warn if an attribute is missing.
             is_print (bool, optional): Whether to print the return value.
-            no_cache (bool, optional): Whether to force a fresh MongoDB call.
+            force_cache_update (bool, optional): For MongoDB. Whether to force a fresh MongoDB call.
             return_type (Type[T], optional): The expected return type of the result.
                 Defaults to object, which includes any type.
 
@@ -664,15 +734,18 @@ class Cabinet:
             get('person', 'tyler', 'salary')  # Returns the value of person -> tyler -> salary
         """
 
-        cache_update_needed = no_cache
+        if self.mongodb_enabled:
+            cache_update_needed = force_cache_update
 
-        # Check if cache data is available and not expired
-        if not no_cache and hasattr(self, 'cached_data') and 'expiresAt' in self.cached_data:
-            expires_at = datetime.fromisoformat(self.cached_data['expiresAt'])
-            cache_update_needed = datetime.now(timezone.utc) >= expires_at
+            # Check if cache data is available and not expired
+            if not force_cache_update and hasattr(self, 'cached_data') \
+                and 'expiresAt' in self.cached_data:
 
-        if cache_update_needed or not self.cached_data:
-            self.update_cache()
+                expires_at = datetime.fromisoformat(self.cached_data['expiresAt'])
+                cache_update_needed = datetime.now(timezone.utc) >= expires_at
+
+            if cache_update_needed or not self.cached_data:
+                self.update_cache()
 
         # Process the cached data
         for document in self.cached_data:
@@ -706,7 +779,8 @@ class Cabinet:
                 return result  # type: ignore
 
         if warn_missing:
-            self.log(f"'{attributes}' not found in cache or MongoDB", level="warn")
+            storage_type: str = "cache or MongoDB" if self.mongodb_enabled else "local storage"
+            self.log(f"'{attributes}' not found in {storage_type}", level="warn")
         return None
 
     def remove(self, *attribute: str, is_print: bool = False):
@@ -1023,7 +1097,7 @@ def main():
                         help='Edit the entire MongoDB')
     parser.add_argument('--edit-file', '-ef', type=str, dest='edit_file',
                         help='Edit a specific file')
-    parser.add_argument('--no-cache', dest='no_cache', action='store_true',
+    parser.add_argument('--force-cache-update', dest='force_cache_update', action='store_true',
                     help='Disable using the cache for MongoDB queries')
     parser.add_argument('--no-create', dest='create',
                         action='store_false',
@@ -1063,12 +1137,13 @@ def main():
     if args.configure:
         cab.config()
     elif args.edit:
-        cab.edit_db()
+        cab.edit_cabinet()
     elif args.edit_file:
         cab.edit_file(file_path=args.edit_file,
                       create_if_not_exist=args.create)
     elif args.get:
-        cab.get(is_print=True, warn_missing=True, no_cache=args.no_cache, *args.get)
+        cab.get(is_print=True, warn_missing=True,
+                force_cache_update=args.force_cache_update, *args.get)
     elif args.put:
         attribute_values = args.put
         cab.put(*attribute_values, is_print=True)
