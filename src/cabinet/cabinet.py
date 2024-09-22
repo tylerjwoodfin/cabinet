@@ -25,7 +25,7 @@ import subprocess
 import importlib.metadata
 from html import escape
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Type, Optional, TypeVar
+from typing import Any, Type, Optional, TypeVar, Union
 import pymongo.errors
 from prompt_toolkit import print_formatted_text, HTML
 from pymongo.errors import PyMongoError, OperationFailure, ConnectionFailure
@@ -440,6 +440,9 @@ class Cabinet:
                 - overridden to 'true' if caller function is `put`.
         """
 
+        if not self.mongodb_enabled:
+            return None
+
         force_update: bool =  force or inspect.stack()[1].function == 'put'
 
         if path is None:
@@ -664,27 +667,40 @@ class Cabinet:
             except TypeError as error:
                 print(error)
 
-        existing_data = self.database.cabinet.find_one({}, {"_id": 0})
+        if self.mongodb_enabled:
+            existing_data = self.database.cabinet.find_one({}, {"_id": 0})
+        else:
+            # read from ~/.cabinet/data.json
+            with open(self.path_file_data, "r", encoding="utf-8") as file:
+                existing_data = json.load(file)
 
-        if not existing_data:
+        if existing_data is None:
             self.log("Could not fetch MongoDB data after update", level="error")
             return None
 
         # Merge the new data with the existing data
-        update = {"$set": {}}
+        if self.mongodb_enabled:
+            update = {"$set": {}}
 
-        if len(attribute) > 2:
-            update["$set"][attribute[0]] = self.merge_nested_data(existing_data.get(
-                attribute[0], {}), json_structure[attribute[0]])
+            if len(attribute) > 2:
+                update["$set"][attribute[0]] = self.merge_nested_data(existing_data.get(
+                    attribute[0], {}), json_structure[attribute[0]])
+            else:
+                update = {"$set": json_structure}
+
+            result = self.database.cabinet.update_many(custom_filter, update)
         else:
-            update = {"$set": json_structure}
-
-        result = self.database.cabinet.update_many(custom_filter, update)
+            # write to ~/.cabinet/data.json
+            with open(self.path_file_data, "w", encoding="utf-8") as file:
+                json.dump(self.merge_nested_data(existing_data, json_structure), file, indent=4)
 
         if is_print:
-            print(f"Modified {result.modified_count} item(s)")
-            print(
-                f"{' -> '.join(attribute[:-1])} set to {value}\n")
+            if self.mongodb_enabled:
+                print(f"Modified {result.modified_count} item(s)")
+                print(
+                    f"{' -> '.join(attribute[:-1])} set to {value}\n")
+            else:
+                print(f"{' -> '.join(attribute[:-1])} set to {value}\n")
 
         self.update_cache()
 
@@ -692,10 +708,12 @@ class Cabinet:
 
     T = TypeVar('T', bound=Any)  # Generic type variable for return_type
     def get(self, *attributes, warn_missing: bool = False, is_print: bool = False,
-            force_cache_update: bool = False, return_type: Optional[Type[T]] = None) -> Optional[T]:
+        force_cache_update: bool = False,
+        return_type: Optional[Type[T]] = None) -> Union[T, Any, None]:
+
         """
-        Returns a property or properties from MongoDB based on the input attributes,
-        using a cache file to improve performance.
+        Returns JSON-formatted data from local storage (~/.cabinet/data.json) or MongoDB,
+        using a cache file to improve performance (if MongoDB enabled).
 
         Args:
             *attributes (str): A sequence of strings representing nested attributes.
@@ -713,18 +731,49 @@ class Cabinet:
             get('person', 'tyler', 'salary')  # Returns the value of person -> tyler -> salary
         """
 
-        if self.mongodb_enabled:
-            cache_update_needed = force_cache_update
+        # handle local storage
+        if not self.mongodb_enabled:
+            # read from ~/.cabinet/data.json
+            with open(self.path_file_data, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                result = data
+                for attribute in attributes:
+                    if isinstance(result, dict) and attribute in result:
+                        result = result[attribute]
+                    else:
+                        if warn_missing:
+                            self.log(f"Attribute '{attribute}' is missing", level="warn")
+                        return None
 
-            # Check if cache data is available and not expired
-            if not force_cache_update and hasattr(self, 'cached_data') \
-                and 'expiresAt' in self.cached_data:
+                if is_print:
+                    if isinstance(result, dict):
+                        print(json.dumps(result, indent=4))
+                    else:
+                        print(result)
 
-                expires_at = datetime.fromisoformat(self.cached_data['expiresAt'])
-                cache_update_needed = datetime.now(timezone.utc) >= expires_at
+                # Handle return_type if specified
+                if return_type is not None:
+                    try:
+                        return return_type(result)
+                    except (ValueError, TypeError) as e:
+                        self.log(f"Error casting result to {return_type}: {str(e)}", level="error")
+                        return None
+                else:
+                    # If no specific return_type is needed, return as Any
+                    return result
 
-            if cache_update_needed or not self.cached_data:
-                self.update_cache()
+        # handle MongoDB
+        cache_update_needed = force_cache_update
+
+        # Check if cache data is available and not expired
+        if not force_cache_update and hasattr(self, 'cached_data') \
+            and 'expiresAt' in self.cached_data:
+
+            expires_at = datetime.fromisoformat(self.cached_data['expiresAt'])
+            cache_update_needed = datetime.now(timezone.utc) >= expires_at
+
+        if cache_update_needed or not self.cached_data:
+            self.update_cache()
 
         # Process the cached data
         for document in self.cached_data:
