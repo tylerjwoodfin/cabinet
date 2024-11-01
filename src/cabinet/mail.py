@@ -49,7 +49,7 @@ class Mail:
 
         Args:
         - subject (str): The subject of the email.
-        - body (str): The body of the email.
+        - body (str): The body of the email. Line breaks will be replaced with <br> tags.
         - signature (str): The signature to include at the end of the email.
         - to_addr (List): A list of email addresses to send the email to.
         - from_name (str, optional): The name to appear in the "From" field of the email.
@@ -98,6 +98,9 @@ class Mail:
         signature = signature or f"<br><br>Thanks,<br>{email_from}"
         body += unquote(signature)
 
+        # Replace newlines with <br> tags in the body
+        body = body.replace('\n', '<br>')
+
         # Create the message object.
         message = MIMEMultipart()
         message["Subject"] = unquote(subject)
@@ -117,7 +120,6 @@ class Mail:
             self.cab.log(f"Port is not an integer (received '{self.port}')", level="error")
             return
 
-        # Send the email.
         server = smtplib.SMTP_SSL(self.smtp_server, self.port)
 
         try:
@@ -127,6 +129,7 @@ class Mail:
                 return
             server.login(self.username, self.password)
 
+            # Send the email.
             server.send_message(message)
 
             if logging_enabled:
