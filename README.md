@@ -10,13 +10,21 @@ Supports email and event logging.
 - Log to a file/directory of your choice without having to configure `logger` each time
 - Easily send mail from the terminal
 
+## Installation and Setup
+
+```bash
+  pip install cabinet
+  cabinet --config
+```
+
 ## Dependencies
 
-- Python >= 3.6
-- MongoDB (optional)
-- Pymongo (`pip install pymongo`)
-- Prompt_toolkit (`pip install prompt_toolkit`)
-- smtplib
+Outside of the standard Python library, the following packages will be installed as part of `pip install cabinet`:
+
+- `pymongo`: Provides the MongoDB client and related errors.
+- `prompt_toolkit`: Provides functionality for command-line interfaces.
+- `bson`: Required for handling BSON objects, such as `ObjectId`, commonly used in MongoDB.
+- `smtplib`: Required for sending mail.
 
 ## Structure
 
@@ -27,17 +35,8 @@ Supports email and event logging.
 - Logs are written to `~/.cabinet/log/LOG_DAILY_YYYY-MM-DD` by default
   - You can change this to something other than `~/.cabinet/log` as needed by setting/modifying `~/.config/cabinet/config.json` -> `path_dir_log`
 
-## Installation and Setup
-
-```bash
-  pip install cabinet
-  pip install pymongo
-  pip install prompt_toolkit
-  cabinet --config
-```
-
 ## CLI usage
-```
+```bash
 Usage: cabinet [OPTIONS]
 
 Options:
@@ -82,7 +81,7 @@ Mail:
     - rather than `cabinet.Cabinet().edit("/home/{username}/path/to/whatever.md")`
 
 file:
-```
+```json
 # example only; these commands will be unique to your setup
 
 {
@@ -100,7 +99,7 @@ file:
 ```
 
 set from terminal:
-```
+```bash
 cabinet -p edit shopping value "/home/{username}/path/to/whatever.md"
 cabinet -p edit todo value "/home/{username}/path/to/whatever.md"
 ```
@@ -112,7 +111,7 @@ cabinet -p edit todo value "/home/{username}/path/to/whatever.md"
 - In Cabinet (`cabinet -e`), add the `email` object to make your settings file look like this example:
 
 file:
-```
+```json
 {
     "email": {
         "from": "throwaway@example.com",
@@ -127,7 +126,7 @@ file:
 ```
 
 set from terminal:
-```
+```bash
 cabinet -p email from throwaway@example.com
 cabinet -p email from_pw example
 ...
@@ -138,7 +137,7 @@ cabinet -p email from_pw example
 ### `put`
 
 python:
-```
+```python
 from cabinet import Cabinet
 
 cab = Cabinet()
@@ -147,12 +146,12 @@ cab.put("employee", "Tyler", "salary", 7.25)
 ```
 
 or terminal:
-```
+```bash
 cabinet -p employee Tyler salary 7.25
 ```
 
 results in this structure in MongoDB:
-```
+```json
 {
     "employee": {
         "Tyler": {
@@ -165,7 +164,7 @@ results in this structure in MongoDB:
 ### `get`
 
 python:
-```
+```python
 from cabinet import Cabinet
 
 cab = Cabinet()
@@ -176,20 +175,20 @@ print(cab.get("employee", "Tyler", "salary"))
 ```
 
 or terminal:
-```
+```bash
 cabinet -g employee Tyler salary
 ```
 - optional: `--force-cache-update` to force a cache update
 
 results in:
-```
+```bash
 7.25
 ```
 
 ### `remove`
 
 python:
-```
+```python
 from cabinet import Cabinet
 
 cab = Cabinet()
@@ -198,12 +197,12 @@ cab.remove("employee", "Tyler", "salary")
 ```
 
 or terminal:
-```
+```bash
 cabinet -rm employee Tyler salary
 ```
 
 results in this structure in MongoDB:
-```
+```json
 {
     "employee": {
         "tyler": {}
@@ -211,10 +210,27 @@ results in this structure in MongoDB:
 }
 ```
 
+### `edit`
+
+terminal:
+```bash
+
+# opens file in the default editor (`cabinet --config` -> 'editor'), saves upon exit
+cabinet -e
+
+# or
+
+cabinet --edit
+
+# you can add an 'editor':
+
+cabinet -e --editor=code
+```
+
 ### `edit_file`
 
 python:
-```
+```python
 from cabinet import Cabinet
 
 cab = Cabinet()
@@ -226,33 +242,37 @@ cab.edit("shopping")
 
 # or you can edit a file directly...
 cab.edit("/path/to/shopping.md")
+
+# you can pass an 'editor' to override the default:
+cab.edit("/path/to/shopping.md", editor="nvim")
 ```
 
 terminal:
-```
+```bash
 # assumes path -> edit -> shopping -> path/to/shopping.md has been set
 cabinet -ef shoppping
 
-or
+# or
 
 cabinet -ef "/path/to/shopping.md"
+
+# or
 ```
 
 ### `mail`
 
 python:
-```
+```python
 
 from cabinet import Mail
 
 mail = Mail()
 
 mail.send('Test Subject', 'Test Body')
-
 ```
 
 terminal:
-```
+```bash
 cabinet --mail --subject "Test Subject" --body "Test Body"
 
 # or
@@ -263,7 +283,7 @@ cabinet --mail -s "Test Subject" -b "Test Body"
 ### `log`
 
 python:
-```
+```python
 from cabinet import Cabinet
 
 cab = Cabinet()
@@ -288,7 +308,7 @@ cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="/home/{username}/weat
 ```
 
 terminal:
-```
+```bash
 # defaults to 'info' if no level is set
 cabinet -l "Connection timed out"
 

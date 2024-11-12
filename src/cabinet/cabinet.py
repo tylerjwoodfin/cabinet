@@ -134,6 +134,7 @@ class Cabinet:
                 print("No common terminal text editors found.")
 
         def config_prompts(key=None):
+            value = ""
             if key == 'mongodb_username':
                 value = input(CONFIG_MONGODB_USERNAME)
             if key == 'mongodb_password':
@@ -257,6 +258,19 @@ class Cabinet:
             if is_print:
                 print(message)
             return message
+
+    def _run_editor(self, editor: str, file_path: str) -> None:
+        """
+        Runs the specified editor on the provided file path,
+        using `--wait` if the editor is VS Code.
+        """
+        if editor.lower() in ["code", "vscode"]:
+            # Use the --wait flag for VS Code to ensure it blocks until the file is closed
+            print("Opening in VS Code. Data will be updated after the file is closed.")
+            subprocess.run([editor, "--wait", file_path], check=True)
+        else:
+            # Run the specified editor normally
+            subprocess.run([editor, file_path], check=True)
 
     def __init__(self):
         """
@@ -472,28 +486,34 @@ class Cabinet:
 
         return json_data
 
-    def edit_cabinet(self):
+    def edit_cabinet(self, editor: str | None = None) -> None:
         """
         Opens the data in self.database.cabinet within a JSON file in
         Nano (default) or the editor specified in `cabinet --config` -> `editor`.
         When the file is closed, it replaces the data in this collection in MongoDB.
+
+        Args:
+            - editor (str, optional): The editor to use, potentially overriding
+                the default. Specified from the terminal with `--editor`.
         """
 
-        # handle local storage
+        if editor is None:
+            editor = self.editor
+
+        # Handle local storage
         if not self.mongodb_enabled:
-            # open path_data_json if it exists; otherwise, display a warning
+            # Open path_data_json if it exists; otherwise, display a warning
             if not os.path.exists(self.path_file_data):
                 self.log(WARN_LOCAL_STORAGE_PATH, level="warn")
                 return
-            subprocess.run([self.editor, self.path_file_data], check=True)
+            self._run_editor(editor, self.path_file_data)
             return
 
         json_data = self.update_cache(self.path_file_cache, force=True)
 
         try:
-
             # Edit the cache file
-            subprocess.run([self.editor, self.path_file_cache], check=True)
+            self._run_editor(editor, self.path_file_cache)
 
             # Read the modified JSON data from the cache
             with open(self.path_file_cache, "r", encoding="utf-8") as file_cache:
@@ -511,22 +531,20 @@ class Cabinet:
                 document["_id"] = ObjectId()  # Assign a new ObjectId
 
             self.database.cabinet.drop()  # Drop the existing collection
-            self.database.cabinet.insert_many(
-                modified_data)  # Insert the modified data
+            self.database.cabinet.insert_many(modified_data)  # Insert the modified data
 
             print("Data in the collection has been updated.")
 
             self.update_cache(force=True)
 
         except FileNotFoundError as err:
-            if self.editor and f"'{self.editor}'" in str(err):
-                self.log(ERROR_CONFIG_BROKEN_EDITOR.replace("%", self.editor),
-                         level="error")
+            if editor and f"'{editor}'" in str(err):
+                self.log(ERROR_CONFIG_BROKEN_EDITOR.replace("%", editor), level="error")
                 self._put_config("editor", "nano")
             else:
                 print(f"Error: Cache file not found in {self.path_file_cache} after cache update.")
         except subprocess.CalledProcessError:
-            print(f"Error: Failed to open the file in '{self.editor}'.")
+            print(f"Error: Failed to open the file in '{editor}'.")
         except json.JSONDecodeError:
             self.log("Failed to parse the modified JSON data.", level="error")
             self.log("Refreshing cache with original data.", level="info")
@@ -534,7 +552,9 @@ class Cabinet:
         except Exception as error:  # pylint: disable=W0703
             print(f"Error: {str(error)}")
 
-    def edit_file(self, file_path: str | None = None, create_if_not_exist: bool = True) -> None:
+    def edit_file(self, file_path: str | None = None,
+                create_if_not_exist: bool = True,
+                editor: str | None = None) -> None:
         """
         Edit and save a file in Nano (default) or specified editor in `cabinet --config`.
 
@@ -545,34 +565,40 @@ class Cabinet:
             - create_if_not_exist (bool, optional): Whether to create the file if it does not exist.
                 Defaults to False.
 
+            - editor (str, optional): The editor to use, potentially overriding
+                the default. Specified from the terminal with `--editor`.
+
         Raises:
             - ValueError: If the file_path is not a string.
 
-            - FileNotFoundError: If the file does not exist and create_if_not_exist is True.
+            - FileNotFoundError: If the file does not exist and create_if_not_exist is False.
 
         Returns:
             None
         """
 
+        if editor is None:
+            editor = self.editor
+
         path_edit = self.get("path", "edit")
 
-        # edit MongoDB Directly if no file_path
+        # Edit Cabinet's MongoDB directly if no file_path
         if file_path is None:
             path = input(EDIT_FILE_DEFAULT)
 
             if path == "":
-                self.edit_cabinet()
+                self.edit_cabinet(editor)
                 return
 
             self.edit_file(path)
             return
 
-        # allows for shortcuts by setting paths in MongoDB -> path -> edit
+        # Allows for shortcuts by setting paths in MongoDB -> path -> edit
         if path_edit and file_path in path_edit:
             item = self.get("path", "edit", file_path)
             if not isinstance(item, dict) or "value" not in item.keys():
-                self.log(f"Could not use shortcut for {file_path} \
-                    in getItem(path -> edit); should be a JSON object with value", level="warn")
+                self.log(f"Could not use shortcut for {file_path} in getItem(path -> edit); "
+                        f"should be a JSON object with value", level="warn")
             else:
                 file_path = item["value"]
 
@@ -588,12 +614,14 @@ class Cabinet:
                 self.log("Could not find file to edit", level="error")
                 raise FileNotFoundError(f"File does not exist: {file_path}")
 
-        # cache original file to check for differences
+        # Cache original file to check for differences
         with open(file_path, "r", encoding="utf-8") as file:
             original_contents = file.readlines()
 
-        os.system(f"{self.editor} {file_path}")
+        # Use _run_editor to open the file in the specified editor
+        self._run_editor(editor, file_path)
 
+        # Check for changes after editing
         with open(file_path, "r", encoding="utf-8") as file:
             new_contents = file.readlines()
 
@@ -1123,7 +1151,7 @@ def main():
     parser.add_argument('--configure', '-config', dest='configure',
                         action='store_true', help='Configure')
     parser.add_argument('--edit', '-e', dest='edit', action='store_true',
-                        help='Edit the entire MongoDB')
+                        help='Edit Cabinet\'s MongoDB as a JSON file')
     parser.add_argument('--edit-file', '-ef', type=str, dest='edit_file',
                         help='Edit a specific file')
     parser.add_argument('--force-cache-update', dest='force_cache_update', action='store_true',
@@ -1147,6 +1175,8 @@ def main():
                         dest='log', help='Log a message to the default location')
     parser.add_argument('--level', type=str, dest='log_level',
                         help='(for -l) Log level [debug, info, warn, error, critical]')
+    parser.add_argument('--editor', type=str, dest='editor',
+                        help='(for --edit and --edit-file) Specify an editor to use')
 
     mail_group = parser.add_argument_group('Mail')
     mail_group.add_argument(
@@ -1166,10 +1196,11 @@ def main():
     if args.configure:
         cab.config()
     elif args.edit:
-        cab.edit_cabinet()
+        cab.edit_cabinet(editor=args.editor)
     elif args.edit_file:
         cab.edit_file(file_path=args.edit_file,
-                      create_if_not_exist=args.create)
+                      create_if_not_exist=args.create,
+                      editor=args.editor)
     elif args.get:
         cab.get(is_print=True, warn_missing=True,
                 force_cache_update=args.force_cache_update, *args.get)
