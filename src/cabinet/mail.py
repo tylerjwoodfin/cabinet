@@ -49,7 +49,7 @@ class Mail:
 
         Args:
         - subject (str): The subject of the email.
-        - body (str): The body of the email. Line breaks will be replaced with <br> tags.
+        - body (str): The body of the email.
         - signature (str): The signature to include at the end of the email.
         - to_addr (List): A list of email addresses to send the email to.
         - from_name (str, optional): The name to appear in the "From" field of the email.
@@ -97,9 +97,6 @@ class Mail:
         # Append `signature` to the `body` of the email.
         signature = signature or f"<br><br>Thanks,<br>{email_from}"
         body += unquote(signature)
-
-        # Replace newlines with <br> tags in the body
-        body = body.replace('\n', '<br>')
 
         # Create the message object.
         message = MIMEMultipart()
