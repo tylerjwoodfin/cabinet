@@ -1119,7 +1119,7 @@ def main():
 
     Usage:
         (from the terminal)
-        cabinet config
+        cabinet --configure
         cabinet edit <file path/name, optional; default: edit entire MongoDB>
     """
 
