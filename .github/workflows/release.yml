@@ -37,7 +37,9 @@ jobs:
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-      run: python -m twine upload dist/* --verbose
+      run: |
+        echo "TWINE_PASSWORD length: ${#TWINE_PASSWORD}"
+        python -m twine upload dist/* --verbose
 
     # Create and push tag
     - name: Create and push tag
