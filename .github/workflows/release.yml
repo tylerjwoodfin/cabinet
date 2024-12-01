@@ -1,5 +1,8 @@
 name: Build, Release Pex File, and Publish to PyPI
 
+permissions:
+  contents: write
+
 on:
   push:
     branches:
@@ -43,12 +46,14 @@ jobs:
 
     # Create and push tag
     - name: Create and push tag
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         VERSION=$(grep -oP '^version\s*=\s*\K.+' setup.cfg)
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
         git tag "v$VERSION"
-        git push origin "v$VERSION"
+        git push https://x-access-token:${GITHUB_TOKEN}@github.com/tylerjwoodfin/cabinet.git "v$VERSION"
 
     # Upload Pex file to GitHub Releases
     - name: Upload Pex file to GitHub Releases
