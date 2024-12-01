@@ -1,8 +1,7 @@
-# cabinet
-A CLI and Python library to easily manage data and logging.
-Supports email and event logging.
+# Cabinet
+Cabinet is a lightweight, flexible data organization tool that lets you manage your data with the simplicity of a JSON file or the power of MongoDB - your choice. It also lets you log messages to a file of your choice and send mail from the terminal.
 
-## Features
+## ✨ Features
 
 - More easily access your data across multiple projects
 - More easily log messages to the file of your choice
@@ -12,9 +11,20 @@ Supports email and event logging.
 
 ## Installation and Setup
 
+### CLI and Python Library
 ```bash
   pip install cabinet
   cabinet --config
+```
+
+### CLI Only
+```bash
+curl -s https://api.github.com/repos/tylerjwoodfin/cabinet/releases/latest \
+| grep "browser_download_url" \
+| cut -d '"' -f 4 \
+| xargs curl -L -o cabinet.pex
+
+sudo mv cabinet.pex /usr/local/bin/cabinet
 ```
 
 ## Dependencies
@@ -23,8 +33,6 @@ Outside of the standard Python library, the following packages will be installed
 
 - `pymongo`: Provides the MongoDB client and related errors.
 - `prompt_toolkit`: Provides functionality for command-line interfaces.
-- `bson`: Required for handling BSON objects, such as `ObjectId`, commonly used in MongoDB.
-- `smtplib`: Required for sending mail.
 
 ## Structure
 

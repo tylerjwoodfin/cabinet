@@ -1,0 +1,54 @@
+name: Build, Release Pex File, and Publish to PyPI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # Set up Python
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    # Install Pex
+    - name: Install Pex
+      run: pip install pex build twine
+
+    # Build Pex file
+    - name: Build Pex file
+      run: pex . -o cabinet.pex --script=cabinet
+
+    # Build PyPI package
+    - name: Build PyPI package
+      run: python -m build
+
+    # Publish to PyPI
+    - name: Publish to PyPI
+      run: |
+        python -m twine upload --repository pypi dist/*
+
+    # Create and push tag
+    - name: Create and push tag
+      run: |
+        VERSION=$(grep -oP '^version\s*=\s*\K.+' setup.cfg)
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag "v$VERSION"
+        git push origin "v$VERSION"
+
+    # Upload Pex file to GitHub Releases
+    - name: Upload Pex file to GitHub Releases
+      uses: ncipollo/release-action@v1
+      with:
+        artifacts: cabinet.pex
+        token: ${{ secrets.GITHUB_TOKEN }}
