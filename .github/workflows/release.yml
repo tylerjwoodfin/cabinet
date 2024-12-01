@@ -46,6 +46,7 @@ jobs:
 
     # Create and push tag
     - name: Create and push tag
+      id: create_tag
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
@@ -54,10 +55,12 @@ jobs:
         git config user.email "actions@github.com"
         git tag "v$VERSION"
         git push https://x-access-token:${GITHUB_TOKEN}@github.com/tylerjwoodfin/cabinet.git "v$VERSION"
+        echo "tag=v$VERSION" >> $GITHUB_ENV
 
     # Upload Pex file to GitHub Releases
     - name: Upload Pex file to GitHub Releases
       uses: ncipollo/release-action@v1
       with:
+        tag: ${{ env.tag }}
         artifacts: cabinet.pex
         token: ${{ secrets.GITHUB_TOKEN }}
