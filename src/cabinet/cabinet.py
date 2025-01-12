@@ -659,16 +659,16 @@ class Cabinet:
 
         def parse_arg(value):
             """
-            Infer the value type (e.g. 2 will not be parsed as a string)
+            Infer the value type (e.g., 2.0 will not be parsed as an int but as a float)
             """
             if value == "null":
                 return None
             try:
+                if '.' in str(value) or 'e' in str(value).lower():
+                    return float(value)
                 return int(value)
             except ValueError:
-                try:
-                    return float(value)
-                except ValueError:
+                if isinstance(value, str):
                     if value.lower() == 'true':
                         return True
                     if value.lower() == 'false':
@@ -677,6 +677,7 @@ class Cabinet:
                         return ast.literal_eval(value)
                     except (SyntaxError, ValueError):
                         return value
+                return value
             except TypeError:
                 return value
 
