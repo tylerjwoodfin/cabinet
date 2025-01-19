@@ -108,7 +108,7 @@ class Cabinet:
 
         def get_editor():
             # List of common terminal text editors
-            editors: list[str] = ["nano", "vim", "nvim", "emacs", "vi", "pico", "mcedit"]
+            editors = ["nano", "vim", "nvim", "emacs", "vi", "pico", "mcedit"]
 
             # Check if each editor is available in the system's PATH
             available_editors = []
@@ -122,16 +122,20 @@ class Cabinet:
 
             # Display the available editors to the user for selection
             if available_editors:
-                # Prompt the user to select an editor
+                print("Available editors:")
+                for i, editor in enumerate(available_editors, start=1):
+                    print(f"{i}. {editor}")
+
                 selection = input(CONFIG_EDITOR)
                 try:
-                    selected_editor: str = available_editors[int(selection) - 1]
+                    selected_editor = available_editors[int(selection) - 1]
                     return selected_editor
                 except (IndexError, ValueError):
                     print(ERROR_CONFIG_INVALID_EDITOR)
                     return "nano"
             else:
-                print("No common terminal text editors found.")
+                print("No common terminal text editors found. Defaulting to 'nano'.")
+                return "nano"
 
         def config_prompts(key=None):
             value = ""
@@ -221,25 +225,31 @@ class Cabinet:
             sys.exit(1)
 
         try:
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(self.path_file_config), exist_ok=True)
+
+            # Open the file for reading and writing, or create it if it doesn't exist
             with open(self.path_file_config, 'r+', encoding="utf8") as file:
                 config = json.load(file)
         except FileNotFoundError:
+            # Create the file and write an empty JSON object
             with open(self.path_file_config, 'x+', encoding="utf8") as file:
                 self._ifprint(
                     "Note: Could not find an existing config file; creating a new one.",
-                    self.is_new_setup is False)
+                    self.is_new_setup is False
+                )
                 file.write('{}')
                 config = {}
 
-        config[key] = value
+        # Update the configuration with the provided key-value pair
+        if key is not None:
+            config[key] = value
 
-        with open(self.path_file_config, 'w+', encoding="utf8") as file:
-            json.dump(config, file, indent=4)
+            # Write the updated config back to the file
+            with open(self.path_file_config, 'w', encoding="utf8") as file:
+                json.dump(config, file, indent=4)
 
-        print(f"\nUpdated configuration file ({self.path_file_config}).")
-        self._ifprint(f"{key} is now {json.dumps(value)}\n", self.is_new_setup is False)
-
-        return value
+        return config.get(key)
 
     def _ifprint(self, message: str, is_print: bool):
         """
