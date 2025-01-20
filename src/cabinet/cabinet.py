@@ -950,7 +950,7 @@ class Cabinet:
         # Custom console handler to only print colored level and message
         class ColorConsoleHandler(logging.StreamHandler):
             """
-            allows for colorful console logs
+            Allows for colorful console logs
             """
             def emit(self, record):
                 color = color_map[record.levelname.lower()]
@@ -983,11 +983,20 @@ class Cabinet:
         # File handler for writing complete logs
         file_handler = logging.FileHandler(os.path.join(
             log_folder_path, f"{log_name}.log"), mode='a')
-        stack = [os.path.basename(frame.filename) for frame in inspect.stack()]
-        stack = list(dict.fromkeys(stack))
-        caller_frame_record = ' -> '.join(reversed(stack))
+
+        # Determine the caller's filename and line number
+        stack = inspect.stack()
+        for frame_info in stack:
+            module = inspect.getmodule(frame_info.frame)
+            module_name = module.__name__ if module else None
+            if module_name and module_name != __name__ and 'logging' not in module_name:
+                caller_file = os.path.join(os.path.basename(os.path.dirname(frame_info.filename)),
+                           os.path.basename(frame_info.filename))
+                caller_line = frame_info.lineno
+                break
+
         file_handler.setFormatter(logging.Formatter(
-            f"%(asctime)s — %(levelname)s -> {caller_frame_record}: %(message)s"))
+            f"%(asctime)s — %(levelname)s -> {caller_file}:{caller_line} -> %(message)s"))
         logger.addHandler(file_handler)
 
         # Add color console handler if not is_quiet
