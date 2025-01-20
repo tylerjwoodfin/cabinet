@@ -11,10 +11,14 @@ Cabinet is a lightweight, flexible data organization tool that lets you manage y
 
 ## Installation and Setup
 
-### CLI and Python Library
+### CLI and Python Library (Recommended)
+
+- Install [pipx](https://pypa.github.io/pipx/) if you don't have it already
+
+- Install `cabinet`:
 ```bash
-  pip install cabinet
-  cabinet --config
+pipx install cabinet
+cabinet --config
 ```
 
 ### CLI Only
@@ -29,7 +33,7 @@ sudo mv cabinet.pex /usr/local/bin/cabinet
 
 ## Dependencies
 
-Outside of the standard Python library, the following packages will be installed as part of `pip install cabinet`:
+Outside of the standard Python library, the following packages are included as part of `pipx install cabinet`:
 
 - `pymongo`: Provides the MongoDB client and related errors.
 - `prompt_toolkit`: Provides functionality for command-line interfaces.
@@ -41,27 +45,33 @@ Outside of the standard Python library, the following packages will be installed
   - cache is written when retrieving data.
   - if cache is older than 1 hour, it is refreshed; otherwise, data is pulled from cache by default
 - Logs are written to `~/.cabinet/log/LOG_DAILY_YYYY-MM-DD` by default
-  - You can change this to something other than `~/.cabinet/log` as needed by setting/modifying `~/.config/cabinet/config.json` -> `path_dir_log`
+  - You can change the path to something other than `~/.cabinet/log` as needed by setting/modifying `~/.config/cabinet/config.json` -> `path_dir_log`
 
 ## CLI usage
-```bash
+```markdown
 Usage: cabinet [OPTIONS]
 
 Options:
-  -h, --help              Show this help message and exit
-  --configure, -config    Configure
-  --export                Export the data in MongoDB to a JSON file
-  --edit, -e              Edit MongoDB in the default editor as a JSON file
-  --edit-file, -ef        Edit a specific file
-  --no-create             (for -ef) Do not create file if it does not exist
-  --get, -g               Get a property from MongoDB (nesting supported)
-  --put, -p               Put a property into MongoDB (nesting supported)
-  --remove, -rm           Removes a property from MongoDB
-  --get-file              Returns the file specified
-  --strip                 (for --get-file) Whether to strip file content whitespace
-  --log, -l               Log a message to the default location
-  --level                 (for -l) Log level [debug, info, warn, error, critical]
-  -v, --version           show version number and exit
+  -h, --help            show this help message and exit
+  --configure, -config  Configure
+  --edit, -e            Edit Cabinet as MongoDB as a JSON file
+  --edit-file EDIT_FILE, -ef EDIT_FILE
+                        Edit a specific file
+  --force-cache-update  Disable using the cache for MongoDB queries
+  --no-create           (for -ef) Do not create file if it does not exist
+  --get GET [GET ...], -g GET [GET ...]
+                        Get a property from MongoDB
+  --put PUT [PUT ...], -p PUT [PUT ...]
+                        Put a property into MongoDB
+  --remove REMOVE [REMOVE ...], -rm REMOVE [REMOVE ...]
+                        Remove a property from MongoDB
+  --get-file GET_FILE   Get file
+  --export              Exports MongoDB to ~/.cabinet/export
+  --strip               (for --get-file) Whether to strip file content whitespace
+  --log LOG, -l LOG     Log a message to the default location
+  --level LOG_LEVEL     (for -l) Log level [debug, info, warn, error, critical]
+  --editor EDITOR       (for --edit and --edit-file) Specify an editor to use
+  -v, --version         Show version number and exit
 
 Mail:
   --mail                Sends an email
@@ -69,6 +79,7 @@ Mail:
                         Email subject
   --body BODY, -b BODY  Email body
   --to TO_ADDR, -t TO_ADDR
+                        The "to" email address
 ```
 
 ## Configuration
@@ -84,9 +95,9 @@ Mail:
 ### edit_file() shortcuts
 - see example below to enable something like
   - `cabinet -ef shopping` from the terminal
-    - rather than `cabinet -ef "/home/{username}/path/to/shopping_list.md"`
+    - rather than `cabinet -ef "~/path/to/shopping_list.md"`
   - or `cabinet.Cabinet().edit("shopping")`
-    - rather than `cabinet.Cabinet().edit("/home/{username}/path/to/whatever.md")`
+    - rather than `cabinet.Cabinet().edit("~/path/to/whatever.md")`
 
 file:
 ```json
@@ -96,10 +107,10 @@ file:
   "path": {
     "edit": {
       "shopping": {
-        "value": "/home/{username}/path/to/whatever.md",
+        "value": "~/path/to/whatever.md",
       },
       "todo": {
-        "value": "/home/{username}/path/to/whatever.md",
+        "value": "~/path/to/whatever.md",
       }
     }
   }
@@ -108,8 +119,8 @@ file:
 
 set from terminal:
 ```bash
-cabinet -p edit shopping value "/home/{username}/path/to/whatever.md"
-cabinet -p edit todo value "/home/{username}/path/to/whatever.md"
+cabinet -p edit shopping value "~/path/to/whatever.md"
+cabinet -p edit todo value "~/path/to/whatever.md"
 ```
 
 ### mail
@@ -307,8 +318,8 @@ cab.log("This is fine", level="info")
 # writes to a file named LOG_TEMPERATURE in the default log directory
 cab.log("30", log_name="LOG_TEMPERATURE")
 
-# writes to a file named LOG_TEMPERATURE in /home/{username}/weather
-cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="/home/{username}/weather")
+# writes to a file named LOG_TEMPERATURE in ~/weather
+cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="~/weather")
 
     # format
     # 2021-12-29 19:29:27,896 — INFO — 30
