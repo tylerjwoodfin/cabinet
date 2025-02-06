@@ -84,13 +84,34 @@ Mail:
 
 ## Configuration
 
-- Upon first launch, the tool will prompt you to enter your MongoDB credentials, as well as
-  the cluster name and Database name. These are stored in `~/.config/cabinet/config.json`.
+- Configuration data is stored in `~/.config/cabinet/config.json`.
+
+- Upon first launch, the tool will walk you through each option.
+  - `path_dir_log` is the directory where logs will be stored by default.
+  - `mongodb_enabled` is a boolean that determines whether MongoDB is used.
+  - `mongodb_db_name` is the name of the database you want to use by default.
+  - `mongodb_connection_string` is the connection string for MongoDB.
+  - `editor` is the default editor that will be used when editing files.
+  - You will be prompted to enter your MongoDB credentials (optional).
+  - If you choose not to use MongoDB, data will be stored in `~/.cabinet/data.json`.
+
+- Follow these instructions to find your MongoDB connection string: [MongoDB Atlas](https://docs.atlas.mongodb.com/tutorial/connect-to-your-cluster/) or [MongoDB](https://docs.mongodb.com/manual/reference/connection-string/) (for local MongoDB, untested).
 
 - You will be asked to configure your default editor from the list of available editors on
   your system. If this step is skipped, or an error occurs, `nano` will be used.
 
   You can change this with `cabinet --config` and modifying the `editor` attribute.
+
+Your `config.json` should look something like this:
+```json
+{
+    "path_dir_log": "/path/to/your/log/directory",
+    "mongodb_db_name": "cabinet (or other name of your choice)",
+    "editor": "nvim",
+    "mongodb_enabled": true,
+    "mongodb_connection_string": "<your connection string>",
+}
+```
 
 ### edit_file() shortcuts
 - see example below to enable something like

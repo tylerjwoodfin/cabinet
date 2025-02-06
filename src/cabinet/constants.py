@@ -47,6 +47,12 @@ CONFIG_MONGODB_DB_NAME = """
 Enter your MongoDB database name:\n
 """
 
+CONFIG_MONGODB_CONNECTION_STRING = """
+Enter your MongoDB connection string (URI).
+
+Instructions: https://www.mongodb.com/docs/atlas/tutorial/connect-to-your-cluster/\n
+"""
+
 CONFIG_PATH_DIR_LOG = """
 Enter the full path where you would like to store Cabinet logs.
 (default: ~/.cabinet/log)\n

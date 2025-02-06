@@ -18,7 +18,6 @@ import ast
 import sys
 import json
 import logging
-import getpass
 import pathlib
 import argparse
 import subprocess
@@ -38,10 +37,8 @@ from .constants import (
     NEW_SETUP_MSG_INTRO,
     NEW_SETUP_MSG_CHECK_MONGODB,
     NEW_SETUP_MSG_MONGODB_INSTRUCTIONS,
-    CONFIG_MONGODB_USERNAME,
-    CONFIG_MONGODB_PASSWORD,
-    CONFIG_MONGODB_CLUSTER_NAME,
     CONFIG_MONGODB_DB_NAME,
+    CONFIG_MONGODB_CONNECTION_STRING,
     CONFIG_PATH_DIR_LOG,
     CONFIG_EDITOR,
     EDIT_FILE_DEFAULT,
@@ -64,10 +61,8 @@ class Cabinet:
     """
 
     mongodb_enabled: bool = False
-    mongodb_username: str = ''
-    mongodb_password: str = ''
-    mongodb_cluster_name: str = ''
     mongodb_db_name: str = ''
+    mongodb_connection_string: str = ''
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
@@ -139,14 +134,10 @@ class Cabinet:
 
         def config_prompts(key=None):
             value = ""
-            if key == 'mongodb_username':
-                value = input(CONFIG_MONGODB_USERNAME)
-            if key == 'mongodb_password':
-                value = getpass.getpass(CONFIG_MONGODB_PASSWORD)
-            if key == 'mongodb_cluster_name':
-                value = input(CONFIG_MONGODB_CLUSTER_NAME)
             if key == 'mongodb_db_name':
                 value = input(CONFIG_MONGODB_DB_NAME)
+            if key == 'mongodb_connection_string':
+                value = input(CONFIG_MONGODB_CONNECTION_STRING)
             if key == 'path_dir_log':
                 value = input(CONFIG_PATH_DIR_LOG) or "~/.cabinet/log"
             if key == 'editor':
@@ -312,8 +303,7 @@ class Cabinet:
 
         # If MongoDB is enabled, include MongoDB-specific keys in the check
         if self._get_config("mongodb_enabled", warn_missing=False) or False:
-            keys.extend(["mongodb_username", "mongodb_password",
-                         "mongodb_cluster_name", "mongodb_db_name"])
+            keys.extend(["mongodb_db_name", "mongodb_connection_string"])
 
         for key in keys:
             value = self._get_config(key, warn_missing=False)
@@ -321,6 +311,14 @@ class Cabinet:
             # path_dir_log is optional and defaults to ~/.cabinet/log if unset
             if key == "path_dir_log" and value == "":
                 continue
+
+            # warn if mongodb_connection_string contains '<db_password>'
+            if key == "mongodb_connection_string" and "<db_password>" in value:
+                self.log(
+                    "Please replace '<db_password>' in mongodb_connection_string "
+                    "with your actual password.",
+                    level="warn"
+                )
 
             setattr(self, key, value)
 
@@ -336,11 +334,9 @@ class Cabinet:
         # Check if MongoDB is enabled
         if self.mongodb_enabled:
             try:
-                self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
-                            f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
-                            f"{self.mongodb_db_name}?retryWrites=true&w=majority")
-                self.client = MongoClient(self.uri, server_api=ServerApi('1'))
+                self.client = MongoClient(self.mongodb_connection_string, server_api=ServerApi('1'))
                 self.database = self.client[self.mongodb_db_name]
+
                 if self.database is None:
                     self.log("Database cannot be initialized", level="error")
                     return None
@@ -1193,10 +1189,16 @@ def main():
                         help='(for --get-file) Whether to strip file content whitespace')
     parser.add_argument('--log', '-l', type=str,
                         dest='log', help='Log a message to the default location')
+    parser.add_argument('--logdb', type=str, dest='logdb',
+                        help='Log a message to MongoDB')
     parser.add_argument('--level', type=str, dest='log_level',
                         help='(for -l) Log level [debug, info, warn, error, critical]')
     parser.add_argument('--editor', type=str, dest='editor',
                         help='(for --edit and --edit-file) Specify an editor to use')
+    parser.add_argument('--db-name', type=str, dest='db_name',
+                        help='(for --logdb) Specify a database name')
+    parser.add_argument('--cluster-name', type=str, dest='cluster_name',
+                        help='(for --logdb) Specify a cluster name')
 
     mail_group = parser.add_argument_group('Mail')
     mail_group.add_argument(
@@ -1235,6 +1237,11 @@ def main():
                               file_path='', strip=args.strip)
     elif args.log:
         cab.log(message=args.log, level=args.log_level)
+    elif args.logbdb:
+        # TODO implement logdb
+        # cab.logdb(message=args.log, level=args.log_level,
+        #           db_name=args.db_name, cluster_name=args.cluster_name)
+        pass
     elif args.export:
         cab.export()
     elif args.mail:
