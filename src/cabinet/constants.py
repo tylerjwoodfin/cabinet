@@ -75,7 +75,7 @@ mongodb_password
 mongodb_cluster_name
 mongodb_db_name
 
-Please try re-running Cabinet.
+Please check the values in ~./.config/cabinet/config.json and try again.
 
 Otherwise, please leave feedback at https://github.com/tylerjwoodfin/cabinet/issues.\n\n
 """

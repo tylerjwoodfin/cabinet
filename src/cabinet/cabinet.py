@@ -108,7 +108,7 @@ class Cabinet:
 
         def get_editor():
             # List of common terminal text editors
-            editors: list[str] = ["nano", "vim", "nvim", "emacs", "vi", "pico", "mcedit"]
+            editors = ["nano", "vim", "nvim", "emacs", "vi", "pico", "mcedit"]
 
             # Check if each editor is available in the system's PATH
             available_editors = []
@@ -122,16 +122,20 @@ class Cabinet:
 
             # Display the available editors to the user for selection
             if available_editors:
-                # Prompt the user to select an editor
+                print("Available editors:")
+                for i, editor in enumerate(available_editors, start=1):
+                    print(f"{i}. {editor}")
+
                 selection = input(CONFIG_EDITOR)
                 try:
-                    selected_editor: str = available_editors[int(selection) - 1]
+                    selected_editor = available_editors[int(selection) - 1]
                     return selected_editor
                 except (IndexError, ValueError):
                     print(ERROR_CONFIG_INVALID_EDITOR)
                     return "nano"
             else:
-                print("No common terminal text editors found.")
+                print("No common terminal text editors found. Defaulting to 'nano'.")
+                return "nano"
 
         def config_prompts(key=None):
             value = ""
@@ -221,25 +225,31 @@ class Cabinet:
             sys.exit(1)
 
         try:
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(self.path_file_config), exist_ok=True)
+
+            # Open the file for reading and writing, or create it if it doesn't exist
             with open(self.path_file_config, 'r+', encoding="utf8") as file:
                 config = json.load(file)
         except FileNotFoundError:
+            # Create the file and write an empty JSON object
             with open(self.path_file_config, 'x+', encoding="utf8") as file:
                 self._ifprint(
                     "Note: Could not find an existing config file; creating a new one.",
-                    self.is_new_setup is False)
+                    self.is_new_setup is False
+                )
                 file.write('{}')
                 config = {}
 
-        config[key] = value
+        # Update the configuration with the provided key-value pair
+        if key is not None:
+            config[key] = value
 
-        with open(self.path_file_config, 'w+', encoding="utf8") as file:
-            json.dump(config, file, indent=4)
+            # Write the updated config back to the file
+            with open(self.path_file_config, 'w', encoding="utf8") as file:
+                json.dump(config, file, indent=4)
 
-        print(f"\nUpdated configuration file ({self.path_file_config}).")
-        self._ifprint(f"{key} is now {json.dumps(value)}\n", self.is_new_setup is False)
-
-        return value
+        return config.get(key)
 
     def _ifprint(self, message: str, is_print: bool):
         """
@@ -940,7 +950,7 @@ class Cabinet:
         # Custom console handler to only print colored level and message
         class ColorConsoleHandler(logging.StreamHandler):
             """
-            allows for colorful console logs
+            Allows for colorful console logs
             """
             def emit(self, record):
                 color = color_map[record.levelname.lower()]
@@ -973,11 +983,20 @@ class Cabinet:
         # File handler for writing complete logs
         file_handler = logging.FileHandler(os.path.join(
             log_folder_path, f"{log_name}.log"), mode='a')
-        stack = [os.path.basename(frame.filename) for frame in inspect.stack()]
-        stack = list(dict.fromkeys(stack))
-        caller_frame_record = ' -> '.join(reversed(stack))
+
+        # Determine the caller's filename and line number
+        stack = inspect.stack()
+        for frame_info in stack:
+            module = inspect.getmodule(frame_info.frame)
+            module_name = module.__name__ if module else None
+            if module_name and module_name != __name__ and 'logging' not in module_name:
+                caller_file = os.path.join(os.path.basename(os.path.dirname(frame_info.filename)),
+                           os.path.basename(frame_info.filename))
+                caller_line = frame_info.lineno
+                break
+
         file_handler.setFormatter(logging.Formatter(
-            f"%(asctime)s — %(levelname)s -> {caller_frame_record}: %(message)s"))
+            f"%(asctime)s — %(levelname)s -> {caller_file}:{caller_line} -> %(message)s"))
         logger.addHandler(file_handler)
 
         # Add color console handler if not is_quiet
