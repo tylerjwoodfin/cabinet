@@ -9,6 +9,9 @@ Cabinet is a lightweight, flexible data organization tool that lets you manage y
 - Log to a file/directory of your choice without having to configure `logger` each time
 - Easily send mail from the terminal
 
+## Breaking change in 2.0.0
+- `mongodb_connection_string` replaces `mongodb_username` and `mongodb_password`.
+
 ## Installation and Setup
 
 ### CLI and Python Library (Recommended)
@@ -84,13 +87,34 @@ Mail:
 
 ## Configuration
 
-- Upon first launch, the tool will prompt you to enter your MongoDB credentials, as well as
-  the cluster name and Database name. These are stored in `~/.config/cabinet/config.json`.
+- Configuration data is stored in `~/.config/cabinet/config.json`.
+
+- Upon first launch, the tool will walk you through each option.
+  - `path_dir_log` is the directory where logs will be stored by default.
+  - `mongodb_enabled` is a boolean that determines whether MongoDB is used.
+  - `mongodb_db_name` is the name of the database you want to use by default.
+  - `mongodb_connection_string` is the connection string for MongoDB.
+  - `editor` is the default editor that will be used when editing files.
+  - You will be prompted to enter your MongoDB credentials (optional).
+  - If you choose not to use MongoDB, data will be stored in `~/.cabinet/data.json`.
+
+- Follow these instructions to find your MongoDB connection string: [MongoDB Atlas](https://docs.atlas.mongodb.com/tutorial/connect-to-your-cluster/) or [MongoDB](https://docs.mongodb.com/manual/reference/connection-string/) (for local MongoDB, untested).
 
 - You will be asked to configure your default editor from the list of available editors on
   your system. If this step is skipped, or an error occurs, `nano` will be used.
 
   You can change this with `cabinet --config` and modifying the `editor` attribute.
+
+Your `config.json` should look something like this:
+```json
+{
+    "path_dir_log": "/path/to/your/log/directory",
+    "mongodb_db_name": "cabinet (or other name of your choice)",
+    "editor": "nvim",
+    "mongodb_enabled": true,
+    "mongodb_connection_string": "<your connection string>",
+}
+```
 
 ### edit_file() shortcuts
 - see example below to enable something like
@@ -336,6 +360,27 @@ cabinet --log "Connection timed out"
 
 # change levels with --level
 cabinet --log "Server is on fire" --level "critical"
+```
+
+### `logdb`
+
+python:
+```python
+from cabinet import Cabinet
+cab = Cabinet()
+cab.logdb("Connection timed out") # logs default to a `logs` collection in MongoDB
+cab.logdb("This function hit a breakpoint", level="debug", collection_name="debugging logs") # customize the collection name
+cab.logdb("Temperature changed significantly", level="critical", db_name="weather") # customize the database name
+cab.logdb("This is fine", level="info", cluster_name="myCluster") # customize the cluster name
+```
+terminal:
+```bash
+# defaults to 'info' if no level is set
+cabinet -ldb "Connection timed out"
+# -l and --log are interchangeable
+cabinet --logdb "Connection timed out"
+# change levels with --level
+cabinet --logdb "Server is on fire" --level "critical"
 ```
 
 ## Disclaimers

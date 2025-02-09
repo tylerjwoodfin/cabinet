@@ -18,7 +18,6 @@ import ast
 import sys
 import json
 import logging
-import getpass
 import pathlib
 import argparse
 import subprocess
@@ -38,10 +37,8 @@ from .constants import (
     NEW_SETUP_MSG_INTRO,
     NEW_SETUP_MSG_CHECK_MONGODB,
     NEW_SETUP_MSG_MONGODB_INSTRUCTIONS,
-    CONFIG_MONGODB_USERNAME,
-    CONFIG_MONGODB_PASSWORD,
-    CONFIG_MONGODB_CLUSTER_NAME,
     CONFIG_MONGODB_DB_NAME,
+    CONFIG_MONGODB_CONNECTION_STRING,
     CONFIG_PATH_DIR_LOG,
     CONFIG_EDITOR,
     EDIT_FILE_DEFAULT,
@@ -64,10 +61,9 @@ class Cabinet:
     """
 
     mongodb_enabled: bool = False
-    mongodb_username: str = ''
-    mongodb_password: str = ''
-    mongodb_cluster_name: str = ''
     mongodb_db_name: str = ''
+    mongodb_cluster_name: str = '' # derived from mongodb_connection_string
+    mongodb_connection_string: str = ''
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
@@ -139,14 +135,10 @@ class Cabinet:
 
         def config_prompts(key=None):
             value = ""
-            if key == 'mongodb_username':
-                value = input(CONFIG_MONGODB_USERNAME)
-            if key == 'mongodb_password':
-                value = getpass.getpass(CONFIG_MONGODB_PASSWORD)
-            if key == 'mongodb_cluster_name':
-                value = input(CONFIG_MONGODB_CLUSTER_NAME)
             if key == 'mongodb_db_name':
                 value = input(CONFIG_MONGODB_DB_NAME)
+            if key == 'mongodb_connection_string':
+                value = input(CONFIG_MONGODB_CONNECTION_STRING)
             if key == 'path_dir_log':
                 value = input(CONFIG_PATH_DIR_LOG) or "~/.cabinet/log"
             if key == 'editor':
@@ -312,8 +304,7 @@ class Cabinet:
 
         # If MongoDB is enabled, include MongoDB-specific keys in the check
         if self._get_config("mongodb_enabled", warn_missing=False) or False:
-            keys.extend(["mongodb_username", "mongodb_password",
-                         "mongodb_cluster_name", "mongodb_db_name"])
+            keys.extend(["mongodb_db_name", "mongodb_connection_string"])
 
         for key in keys:
             value = self._get_config(key, warn_missing=False)
@@ -322,7 +313,24 @@ class Cabinet:
             if key == "path_dir_log" and value == "":
                 continue
 
+            # warn if mongodb_connection_string contains '<db_password>'
+            if key == "mongodb_connection_string" and "<db_password>" in value:
+                self.log(
+                    "Please replace '<db_password>' in mongodb_connection_string "
+                    "with your actual password.",
+                    level="warn"
+                )
+
             setattr(self, key, value)
+
+        # derive cluster from mongodb_connection_string
+        if self.mongodb_connection_string:
+            try:
+                self.mongodb_cluster_name = self.mongodb_connection_string.split(
+                    '@')[1].split('.')[0]
+            except IndexError:
+                self.log("Could not get cluster from mongodb_connection_string", level="warn")
+                self.mongodb_cluster_name = "unknown"
 
         # check for missing relevant keys
         keys.remove("path_dir_log")
@@ -336,11 +344,9 @@ class Cabinet:
         # Check if MongoDB is enabled
         if self.mongodb_enabled:
             try:
-                self.uri = (f"mongodb+srv://{self.mongodb_username}:{self.mongodb_password}"
-                            f"@{self.mongodb_cluster_name}.1jxchnk.mongodb.net/"
-                            f"{self.mongodb_db_name}?retryWrites=true&w=majority")
-                self.client = MongoClient(self.uri, server_api=ServerApi('1'))
+                self.client = MongoClient(self.mongodb_connection_string, server_api=ServerApi('1'))
                 self.database = self.client[self.mongodb_db_name]
+
                 if self.database is None:
                     self.log("Database cannot be initialized", level="error")
                     return None
@@ -928,6 +934,9 @@ class Cabinet:
             None
         """
 
+        if not message:
+            raise ValueError("Message cannot be empty")
+
         if level is None:
             level = 'info'
 
@@ -1007,6 +1016,105 @@ class Cabinet:
 
         # Log the message
         getattr(logger, level.lower())(message)
+
+    def logdb(self, message: str = '', db_name: str | None = None, cluster_name: str | None = None,
+            collection_name: str = 'logs', level: str | None = None) -> None:
+        """
+        Logs a message to MongoDB using the specified database and cluster names.
+        Falls back to configured values if not provided.
+
+        Args:
+            message (str, optional): The message to log. Defaults to ''.
+            db_name (str, optional): The name of the MongoDB database to use.
+                If not provided, uses the configured database name.
+            cluster_name (str, optional): The name of the MongoDB cluster to use.
+                If not provided, use cluster from `mongodb_connection_string`.
+            collection_name (str, optional): The name of the collection to store logs in.
+                Defaults to 'logs'.
+            level (str, optional): The log level to use.
+                Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
+                Defaults to 'info'.
+
+        Raises:
+            ValueError: If an invalid log level is provided or MongoDB is not enabled.
+            pymongo.errors.PyMongoError: If there is an error connecting to MongoDB.
+
+        Returns:
+            None
+        """
+        if not self.mongodb_enabled:
+            raise ValueError("MongoDB must be enabled to use logdb")
+
+        if not message:
+            raise ValueError("Message cannot be empty")
+
+        if level is None:
+            level = 'info'
+
+        if level == 'warn':
+            level = 'warning'
+
+        valid_levels = {'debug', 'info', 'warning', 'error', 'critical'}
+        if level.lower() not in valid_levels:
+            raise ValueError(f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}.")
+
+        # Use provided values or fall back to configured ones
+        db_name = db_name or self.mongodb_db_name
+        cluster_name = cluster_name or self.mongodb_cluster_name
+
+        try:
+            # Determine the caller's filename and line number
+            stack = inspect.stack()
+            caller_file = "unknown"
+            caller_line = 0
+            for frame_info in stack:
+                module = inspect.getmodule(frame_info.frame)
+                module_name = module.__name__ if module else None
+                if module_name and module_name != __name__ and 'logging' not in module_name:
+                    caller_file = os.path.join(
+                        os.path.basename(os.path.dirname(frame_info.filename)),
+                                            os.path.basename(frame_info.filename))
+                    caller_line = frame_info.lineno
+                    break
+
+            # Create log entry
+            log_entry = {
+                "timestamp": datetime.now(timezone.utc),
+                "level": level.upper(),
+                "message": message,
+                "source": {
+                    "file": caller_file,
+                    "line": caller_line
+                }
+            }
+
+            # Insert the log entry
+            self.database[collection_name].insert_one(log_entry)
+
+            # Print to console with color (matching the log method's behavior)
+            color_map = {
+                'debug': 'ansiwhite',
+                'info': 'ansigreen',
+                'warning': 'ansiyellow',
+                'error': 'ansired',
+                'critical': 'ansimagenta'
+            }
+            color = color_map[level.lower()]
+            escaped_msg = escape(message)
+            print_formatted_text(HTML(f'<{color}>{level.upper()}: {escaped_msg}</{color}>'))
+
+        except pymongo.errors.InvalidURI as error:
+            print(f"Invalid MongoDB URI: {error}")
+            raise
+        except pymongo.errors.ServerSelectionTimeoutError as error:
+            print(f"MongoDB connection timeout: {error}")
+            raise
+        except pymongo.errors.ConfigurationError as error:
+            print(f"MongoDB configuration error: {error}")
+            raise
+        except Exception as error:
+            print(f"Unexpected error while logging to MongoDB: {error}")
+            raise
 
     def get_file_as_array(self, file_name: str, file_path: str = '', strip: bool = True,
                           ignore_not_found: bool = False):
@@ -1193,10 +1301,16 @@ def main():
                         help='(for --get-file) Whether to strip file content whitespace')
     parser.add_argument('--log', '-l', type=str,
                         dest='log', help='Log a message to the default location')
+    parser.add_argument('--logdb', '-ldb', type=str,
+                        dest='logdb', help='Log a message to MongoDB')
     parser.add_argument('--level', type=str, dest='log_level',
                         help='(for -l) Log level [debug, info, warn, error, critical]')
     parser.add_argument('--editor', type=str, dest='editor',
                         help='(for --edit and --edit-file) Specify an editor to use')
+    parser.add_argument('--db-name', type=str, dest='db_name',
+                        help='(for --logdb) Specify a database name')
+    parser.add_argument('--cluster-name', type=str, dest='cluster_name',
+                        help='(for --logdb) Specify a cluster name')
 
     mail_group = parser.add_argument_group('Mail')
     mail_group.add_argument(
@@ -1235,6 +1349,9 @@ def main():
                               file_path='', strip=args.strip)
     elif args.log:
         cab.log(message=args.log, level=args.log_level)
+    elif args.logdb:
+        cab.logdb(message=args.logdb, level=args.log_level,
+                  db_name=args.db_name, cluster_name=args.cluster_name)
     elif args.export:
         cab.export()
     elif args.mail:
