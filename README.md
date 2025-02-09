@@ -9,6 +9,9 @@ Cabinet is a lightweight, flexible data organization tool that lets you manage y
 - Log to a file/directory of your choice without having to configure `logger` each time
 - Easily send mail from the terminal
 
+## Breaking change in 2.0.0
+- `mongodb_connection_string` replaces `mongodb_username` and `mongodb_password`.
+
 ## Installation and Setup
 
 ### CLI and Python Library (Recommended)
@@ -357,6 +360,27 @@ cabinet --log "Connection timed out"
 
 # change levels with --level
 cabinet --log "Server is on fire" --level "critical"
+```
+
+### `logdb`
+
+python:
+```python
+from cabinet import Cabinet
+cab = Cabinet()
+cab.logdb("Connection timed out") # logs default to a `logs` collection in MongoDB
+cab.logdb("This function hit a breakpoint", level="debug", collection_name="debugging logs") # customize the collection name
+cab.logdb("Temperature changed significantly", level="critical", db_name="weather") # customize the database name
+cab.logdb("This is fine", level="info", cluster_name="myCluster") # customize the cluster name
+```
+terminal:
+```bash
+# defaults to 'info' if no level is set
+cabinet -ldb "Connection timed out"
+# -l and --log are interchangeable
+cabinet --logdb "Connection timed out"
+# change levels with --level
+cabinet --logdb "Server is on fire" --level "critical"
 ```
 
 ## Disclaimers
