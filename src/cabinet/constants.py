@@ -31,18 +31,6 @@ To create a MongoDB account using the free tier, follow these instructions:
 Press Enter once this is done.\n\n
 """
 
-CONFIG_MONGODB_USERNAME = """
-Enter your MongoDB username (not your email address):\n
-"""
-
-CONFIG_MONGODB_PASSWORD = """
-Enter your MongoDB password:\n
-"""
-
-CONFIG_MONGODB_CLUSTER_NAME = """
-Enter your MongoDB cluster name:\n
-"""
-
 CONFIG_MONGODB_DB_NAME = """
 Enter your MongoDB database name:\n
 """

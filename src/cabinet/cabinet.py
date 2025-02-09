@@ -323,6 +323,15 @@ class Cabinet:
 
             setattr(self, key, value)
 
+        # derive cluster from mongodb_connection_string
+        if self.mongodb_connection_string:
+            try:
+                self.mongodb_cluster_name = self.mongodb_connection_string.split(
+                    '@')[1].split('.')[0]
+            except IndexError:
+                self.log("Could not get cluster from mongodb_connection_string", level="warn")
+                self.mongodb_cluster_name = "unknown"
+
         # check for missing relevant keys
         keys.remove("path_dir_log")
         if any(getattr(self, key) is None or getattr(self, key) == '' for key in keys):
