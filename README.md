@@ -1,15 +1,41 @@
 # Cabinet
-Cabinet is a lightweight, flexible data organization tool that lets you manage your data with the simplicity of a JSON file or the power of MongoDB - your choice. It also lets you log messages to a file of your choice and send mail from the terminal.
+Cabinet is a lightweight, flexible data organization tool that lets you manage your data with the simplicity of a JSON file or the power of MongoDB - your choice.
+
+- [Cabinet](#cabinet)
+  - [✨ Features](#-features)
+    - [Breaking change in 2.0.0](#breaking-change-in-200)
+  - [Installation and Setup](#installation-and-setup)
+    - [CLI and Python Library (Recommended)](#cli-and-python-library-recommended)
+    - [CLI Only](#cli-only)
+  - [Dependencies](#dependencies)
+  - [Structure](#structure)
+  - [CLI usage](#cli-usage)
+  - [Configuration](#configuration)
+    - [edit\_file() shortcuts](#edit_file-shortcuts)
+    - [mail](#mail)
+  - [Examples](#examples)
+    - [`put`](#put)
+    - [`get`](#get)
+    - [`remove`](#remove)
+    - [`edit`](#edit)
+    - [`edit_file`](#edit_file)
+    - [`mail`](#mail-1)
+    - [`log`](#log)
+    - [`logdb`](#logdb)
+  - [UI Module](#ui-module)
+  - [Disclaimers](#disclaimers)
+  - [Author](#author)
+
 
 ## ✨ Features
 
-- More easily access your data across multiple projects
-- More easily log messages to the file of your choice
+- Access your data across multiple projects
+- Log messages to MongoDB or a file of your choice
 - Edit MongoDB as though it were a JSON file
-- Log to a file/directory of your choice without having to configure `logger` each time
-- Easily send mail from the terminal
+- Send mail from the terminal
+- Library for interactive command-line interface components using `prompt_toolkit`
 
-## Breaking change in 2.0.0
+### Breaking change in 2.0.0
 - `mongodb_connection_string` replaces `mongodb_username` and `mongodb_password`.
 
 ## Installation and Setup
@@ -381,6 +407,24 @@ cabinet -ldb "Connection timed out"
 cabinet --logdb "Connection timed out"
 # change levels with --level
 cabinet --logdb "Server is on fire" --level "critical"
+```
+
+## UI Module
+
+The `cabinet.ui` module provides interactive command-line interface components:
+
+```python
+from cabinet.ui import list_selection, render_html, confirmation
+
+# List selection
+items = ["Option 1", "Option 2", "Option 3"]
+selected_index = list_selection(items, "Choose an option:")
+
+# HTML rendering
+render_html("<b>Bold text</b> and <i>italic text</i>")
+
+# Confirmation dialog
+result = confirmation("Do you want to proceed?", "Confirmation")
 ```
 
 ## Disclaimers
