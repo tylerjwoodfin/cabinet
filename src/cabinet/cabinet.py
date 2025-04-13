@@ -53,6 +53,7 @@ from .constants import (
     WARN_LOCAL_STORAGE_PATH,
 )
 from .mail import Mail
+from importlib.metadata import version
 
 
 class Cabinet:
@@ -1252,12 +1253,6 @@ def main():
     """
 
     cab = Cabinet()
-    package_name = sys.modules[__name__].__package__
-    if package_name:
-        package_name = package_name.split('.')[0]
-    else:
-        package_name = 'cabinet'
-    version = importlib.metadata.version(package_name)
 
     class ValidatePutArgs(argparse.Action):
         """
@@ -1322,8 +1317,8 @@ def main():
     mail_group.add_argument('--to', '-t', dest='to_addr',
                             help='The "to" email address')
 
-    parser.add_argument('-v', '--version',
-                        action='version', help='Show version number and exit', version=version)
+    parser.add_argument('-v', '--version', action='version',
+                        help='Display the version of Cabinet', version=version('cabinet'))
 
     args = parser.parse_args()
 
