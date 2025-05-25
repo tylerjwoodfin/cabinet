@@ -43,7 +43,8 @@ class Mail:
              to_addr = None, # should be List[str]; TODO update Cabinet to support type casting
              from_name: str | None = None,
              logging_enabled: bool = True,
-             is_quiet: bool = False) -> None:
+             is_quiet: bool = False,
+             timeout: int = 4) -> None:
         """
         Sends an email with the given subject and body to the specified recipients.
 
@@ -59,9 +60,12 @@ class Mail:
             Defaults to True.
         - is_quiet: Whether to suppress log output.
             Defaults to False.
+        - timeout (int, optional): Timeout in seconds for SMTP operations.
+            Defaults to 4 seconds.
 
         Raises:
         - smtplib.SMTPAuthenticationError: If the SMTP server rejects the login credentials.
+        - socket.timeout: If the SMTP operations exceed the timeout period.
 
         Gmail will almost certainly not work.
         """
@@ -117,7 +121,7 @@ class Mail:
             self.cab.log(f"Port is not an integer (received '{self.port}')", level="error")
             return
 
-        server = smtplib.SMTP_SSL(self.smtp_server, self.port)
+        server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
 
         try:
 
@@ -137,6 +141,10 @@ class Mail:
         except smtplib.SMTPAuthenticationError as err:
             self.cab.log(
                 f"Could not log into {self.username}; set this with Cabinet.\n\n{err}",
+                level="error")
+        except (socket.timeout, smtplib.SMTPServerDisconnected) as err:
+            self.cab.log(
+                f"SMTP connection failed after {timeout} seconds: {err}",
                 level="error")
 
 if __name__ == "__main__":
