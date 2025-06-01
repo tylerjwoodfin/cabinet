@@ -75,18 +75,7 @@ Otherwise, please leave feedback at https://github.com/tylerjwoodfin/cabinet/iss
 """
 
 ERROR_CONFIG_MISSING_VALUES = """
-Cabinet could not initialize properly- some values appear to be missing.
-
-Please check that all values in the configuration file exist and are properly set:
-mongodb_enabled
-editor
-path_dir_log (optional)
-mongodb_username (if mongodb_enabled is 'true')
-mongodb_password (if mongodb_enabled is 'true')
-mongodb_cluster_name (if mongodb_enabled is 'true')
-mongodb_db_name (if mongodb_enabled is 'true')
-
-Press Enter to open the file. Update any invalid values and try again.\n
+Press Enter to open the file. Add any missing values and try again.\n
 """
 
 ERROR_CONFIG_JSON_DECODE = """
