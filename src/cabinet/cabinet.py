@@ -24,6 +24,7 @@ import subprocess
 from html import escape
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Type, Optional, TypeVar, Union
+from importlib.metadata import version
 import pymongo.errors
 from prompt_toolkit import print_formatted_text, HTML
 from pymongo.errors import PyMongoError, OperationFailure, ConnectionFailure
@@ -52,7 +53,6 @@ from .constants import (
     WARN_LOCAL_STORAGE_PATH,
 )
 from .mail import Mail
-from importlib.metadata import version
 
 
 class Cabinet:
