@@ -159,6 +159,7 @@ class Cabinet:
             # Create the .cabinet directory if it doesn't exist
             path_cabinet = helpers.resolve_path("~/.cabinet")
             if not pathlib.Path(path_cabinet).exists():
+                print(f"Creating directory: {path_cabinet}")
                 os.makedirs(path_cabinet)
 
             while True:
@@ -309,11 +310,12 @@ class Cabinet:
         for key in keys:
             value = self._get_config(key, warn_missing=False)
 
-            # path_dir_log is optional and defaults to ~/.cabinet/log if unset
+            if isinstance(value, str):
+                value = os.path.expandvars(os.path.expanduser(value))
+
             if key == "path_dir_log" and value == "":
                 continue
 
-            # warn if mongodb_connection_string contains '<db_password>'
             if key == "mongodb_connection_string" and "<db_password>" in value:
                 self.log(
                     "Please replace '<db_password>' in mongodb_connection_string "
@@ -403,6 +405,7 @@ class Cabinet:
 
         # verify path_dir_log exists
         if not os.path.exists(self.path_dir_log):
+            print(f"Creating directory: {self.path_dir_log}")
             os.makedirs(self.path_dir_log)
 
     def config(self):
@@ -1272,7 +1275,7 @@ def main():
             setattr(namespace, self.dest, values)
 
     parser = argparse.ArgumentParser(
-        description=f"Cabinet ({version})")
+        description=f"Cabinet ({version('cabinet')})")
 
     parser.add_argument('--configure', '-config', dest='configure',
                         action='store_true', help='Configure')
