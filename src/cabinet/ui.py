@@ -5,7 +5,7 @@ provides interactive command-line interface components using prompt_toolkit.
 includes functions for list selection, html rendering, and confirmation dialogs.
 """
 
-from typing import List, Optional
+from typing import List
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.shortcuts import radiolist_dialog, yes_no_dialog
