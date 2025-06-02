@@ -21,7 +21,6 @@ import logging
 import pathlib
 import argparse
 import subprocess
-import importlib.metadata
 from html import escape
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Type, Optional, TypeVar, Union
@@ -335,7 +334,11 @@ class Cabinet:
 
         # check for missing relevant keys
         keys.remove("path_dir_log")
-        if any(getattr(self, key) is None or getattr(self, key) == '' for key in keys):
+        missing_keys = [key for key in keys \
+            if getattr(self, key) is None or getattr(self, key) == '']
+        if missing_keys:
+            newline = '\n'
+            print(f"Missing required values:{newline}{newline}-".join(missing_keys))
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
             sys.exit(-1)
