@@ -10,6 +10,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.shortcuts import radiolist_dialog, yes_no_dialog
 
+
 def list_selection(items: List[str], prompt: str = "Make a Selection:") -> int:
     """
     display a list of items and return the index of the selected item
@@ -24,13 +25,11 @@ def list_selection(items: List[str], prompt: str = "Make a Selection:") -> int:
     choices = [(i, item) for i, item in enumerate(items)]
 
     # show the dialog and get the result
-    result = radiolist_dialog(
-        title=prompt,
-        values=choices
-    ).run()
+    result = radiolist_dialog(title=prompt, values=choices).run()
 
     # return the index of the selected item
     return result if result is not None else -1
+
 
 def render_html(html_text: str) -> None:
     """
@@ -48,6 +47,7 @@ def render_html(html_text: str) -> None:
     # display the formatted text
     session.prompt(formatted_text)
 
+
 def confirmation(
     prompt: str = "Are you sure?",
     title: str = "Confirmation",
@@ -64,9 +64,6 @@ def confirmation(
     """
 
     # show a yes/no dialog
-    result = yes_no_dialog(
-        title=title,
-        text=prompt
-    ).run()
+    result = yes_no_dialog(title=title, text=prompt).run()
 
     return result
