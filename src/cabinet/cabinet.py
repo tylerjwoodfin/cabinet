@@ -17,7 +17,9 @@ import os
 import ast
 import sys
 import json
+import re
 import logging
+import socket
 import pathlib
 import argparse
 import subprocess
@@ -61,9 +63,9 @@ class Cabinet:
     """
 
     mongodb_enabled: bool = False
-    mongodb_db_name: str = ''
-    mongodb_cluster_name: str = '' # derived from mongodb_connection_string
-    mongodb_connection_string: str = ''
+    mongodb_db_name: str = ""
+    mongodb_cluster_name: str = ""  # derived from mongodb_connection_string
+    mongodb_connection_string: str = ""
     mongodb_uri = ""
     client: MongoClient | None = None
     database: Database
@@ -73,7 +75,7 @@ class Cabinet:
     path_file_config: str = f"{path_dir_config}/config.json"
     path_file_cache: str = f"{path_dir_config}/cache.json"
     path_file_data: str = f"{path_dir_cabinet}/data.json"
-    editor: str = 'nano'
+    editor: str = "nano"
     cached_data: dict = {}
     is_new_setup: bool = False
 
@@ -109,10 +111,12 @@ class Cabinet:
             # Check if each editor is available in the system's PATH
             available_editors = []
             for editor in editors:
-                result = subprocess.run(["which", editor],
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        check=False)
+                result = subprocess.run(
+                    ["which", editor],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
                 if result.returncode == 0:
                     available_editors.append(editor)
 
@@ -135,13 +139,13 @@ class Cabinet:
 
         def config_prompts(key=None):
             value = ""
-            if key == 'mongodb_db_name':
+            if key == "mongodb_db_name":
                 value = input(CONFIG_MONGODB_DB_NAME)
-            if key == 'mongodb_connection_string':
+            if key == "mongodb_connection_string":
                 value = input(CONFIG_MONGODB_CONNECTION_STRING)
-            if key == 'path_dir_log':
+            if key == "path_dir_log":
                 value = input(CONFIG_PATH_DIR_LOG) or "~/.cabinet/log"
-            if key == 'editor':
+            if key == "editor":
                 value = get_editor()
 
             if value:
@@ -150,7 +154,7 @@ class Cabinet:
             return value
 
         try:
-            with open(self.path_file_config, 'r+', encoding="utf8") as file:
+            with open(self.path_file_config, "r+", encoding="utf8") as file:
                 return json.load(file)[key]
         except FileNotFoundError:
             # setup
@@ -164,7 +168,7 @@ class Cabinet:
 
             while True:
                 storage_type = input(NEW_SETUP_MSG_INTRO).strip()
-                if storage_type in {'1', '2'}:
+                if storage_type in {"1", "2"}:
                     break
                 print("Please enter 1 or 2.")
 
@@ -181,23 +185,24 @@ class Cabinet:
             if self.is_new_setup:
                 return config_prompts(key)
             elif warn_missing:
-                print(
-                    f"Warning: Could not find {key} in {self.path_file_config}")
+                print(f"Warning: Could not find {key} in {self.path_file_config}")
             return ""
         except json.decoder.JSONDecodeError:
             err_msg = f"Problem reading {self.path_file_config}.\n\n{ERROR_CONFIG_JSON_DECODE}"
             response = input(err_msg)
 
             if response.lower().startswith("y"):
-                with open(self.path_file_config, 'w+', encoding="utf8") as file:
-                    file.write('{}')
+                with open(self.path_file_config, "w+", encoding="utf8") as file:
+                    file.write("{}")
                 print("Done. Please try again.")
             else:
                 print(f"OK. Please fix {self.path_file_config} and try again.")
 
             sys.exit(-1)
 
-    def _put_config(self, key: str | None = None, value: Any | None = None) -> Any | None:
+    def _put_config(
+        self, key: str | None = None, value: Any | None = None
+    ) -> Any | None:
         """
         Updates the configuration file at ~/.config/cabinet/config.json with
         the specified key-value pair.
@@ -222,16 +227,16 @@ class Cabinet:
             os.makedirs(os.path.dirname(self.path_file_config), exist_ok=True)
 
             # Open the file for reading and writing, or create it if it doesn't exist
-            with open(self.path_file_config, 'r+', encoding="utf8") as file:
+            with open(self.path_file_config, "r+", encoding="utf8") as file:
                 config = json.load(file)
         except FileNotFoundError:
             # Create the file and write an empty JSON object
-            with open(self.path_file_config, 'x+', encoding="utf8") as file:
+            with open(self.path_file_config, "x+", encoding="utf8") as file:
                 self._ifprint(
                     "Note: Could not find an existing config file; creating a new one.",
-                    self.is_new_setup is False
+                    self.is_new_setup is False,
                 )
-                file.write('{}')
+                file.write("{}")
                 config = {}
 
         # Update the configuration with the provided key-value pair
@@ -239,7 +244,7 @@ class Cabinet:
             config[key] = value
 
             # Write the updated config back to the file
-            with open(self.path_file_config, 'w', encoding="utf8") as file:
+            with open(self.path_file_config, "w", encoding="utf8") as file:
                 json.dump(config, file, indent=4)
 
         return config.get(key)
@@ -299,7 +304,7 @@ class Cabinet:
 
         # for compatibility, set mongodb_enabled to True if all MongoDB keys are present
         if all(self._get_config(key, warn_missing=False) for key in keys[1:]):
-            if self._get_config("mongodb_enabled", warn_missing=False) == '':
+            if self._get_config("mongodb_enabled", warn_missing=False) == "":
                 self._put_config("mongodb_enabled", True)
                 self.mongodb_enabled = True
 
@@ -320,7 +325,7 @@ class Cabinet:
                 self.log(
                     "Please replace '<db_password>' in mongodb_connection_string "
                     "with your actual password.",
-                    level="warn"
+                    level="warn",
                 )
 
             setattr(self, key, value)
@@ -328,18 +333,24 @@ class Cabinet:
         # derive cluster from mongodb_connection_string
         if self.mongodb_connection_string:
             try:
-                self.mongodb_cluster_name = self.mongodb_connection_string.split(
-                    '@')[1].split('.')[0]
+                self.mongodb_cluster_name = self.mongodb_connection_string.split("@")[
+                    1
+                ].split(".")[0]
             except IndexError:
-                self.log("Could not get cluster from mongodb_connection_string", level="warn")
+                self.log(
+                    "Could not get cluster from mongodb_connection_string", level="warn"
+                )
                 self.mongodb_cluster_name = "unknown"
 
         # check for missing relevant keys
         keys.remove("path_dir_log")
-        missing_keys = [key for key in keys \
-            if getattr(self, key) is None or getattr(self, key) == '']
+        missing_keys = [
+            key
+            for key in keys
+            if getattr(self, key) is None or getattr(self, key) == ""
+        ]
         if missing_keys:
-            newline = '\n'
+            newline = "\n"
             print(f"Missing required values:{newline}{newline}-".join(missing_keys))
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
@@ -350,7 +361,9 @@ class Cabinet:
         # Check if MongoDB is enabled
         if self.mongodb_enabled:
             try:
-                self.client = MongoClient(self.mongodb_connection_string, server_api=ServerApi('1'))
+                self.client = MongoClient(
+                    self.mongodb_connection_string, server_api=ServerApi("1")
+                )
                 self.database = self.client[self.mongodb_db_name]
 
                 if self.database is None:
@@ -374,7 +387,7 @@ class Cabinet:
             # Load cached data from local JSON file
             if os.path.exists(self.path_file_data):
                 try:
-                    with open(self.path_file_data, 'r', encoding='utf-8') as data_file:
+                    with open(self.path_file_data, "r", encoding="utf-8") as data_file:
                         self.cached_data = json.load(data_file)
                 except json.decoder.JSONDecodeError:
                     err_msg = f"Problem reading {self.path_file_data}.\n\n"
@@ -382,8 +395,8 @@ class Cabinet:
                     response = input(err_msg)
 
                     if response.lower().startswith("y"):
-                        with open(self.path_file_data, 'w+', encoding="utf8") as file:
-                            file.write('{}')
+                        with open(self.path_file_data, "w+", encoding="utf8") as file:
+                            file.write("{}")
                         print("Done. Please try again.")
                     else:
                         print(f"OK. Please fix {self.path_file_data} and try again.")
@@ -395,9 +408,13 @@ class Cabinet:
                 input()
                 try:
                     # Attempt to create the missing file
-                    with open(self.path_file_data, 'w+', encoding="utf8") as file:
-                        file.write('{}')
-                    self.log("New data file created successfully.", level="info", is_quiet=True)
+                    with open(self.path_file_data, "w+", encoding="utf8") as file:
+                        file.write("{}")
+                    self.log(
+                        "New data file created successfully.",
+                        level="info",
+                        is_quiet=True,
+                    )
                 except IOError as e:
                     # Handle potential file creation errors
                     self.log(f"Failed to create data file: {str(e)}", level="error")
@@ -449,20 +466,22 @@ class Cabinet:
             # User is in a terminal, open with default editor
             try:
                 subprocess.run(
-                    [os.environ.get('EDITOR', 'vi'), self.path_file_config], check=True)
+                    [os.environ.get("EDITOR", "vi"), self.path_file_config], check=True
+                )
             except FileNotFoundError:
                 print("Default editor not found. Unable to open the file.")
         else:
-            if sys.platform.startswith('win32'):
+            if sys.platform.startswith("win32"):
                 # Windows
                 subprocess.run(
-                    ['start', '', self.path_file_config], shell=True, check=True)
-            elif sys.platform.startswith('darwin'):
+                    ["start", "", self.path_file_config], shell=True, check=True
+                )
+            elif sys.platform.startswith("darwin"):
                 # macOS
-                subprocess.run(['open', self.path_file_config], check=True)
-            elif sys.platform.startswith('linux'):
+                subprocess.run(["open", self.path_file_config], check=True)
+            elif sys.platform.startswith("linux"):
                 # Linux
-                subprocess.run(['xdg-open', self.path_file_config], check=True)
+                subprocess.run(["xdg-open", self.path_file_config], check=True)
             else:
                 print(f"Please edit ${self.path_file_config} to configure.")
 
@@ -480,7 +499,7 @@ class Cabinet:
         if not self.mongodb_enabled:
             return None
 
-        force_update: bool =  force or inspect.stack()[1].function == 'put'
+        force_update: bool = force or inspect.stack()[1].function == "put"
 
         if path is None:
             path = self.path_file_cache
@@ -494,7 +513,9 @@ class Cabinet:
                 return None
 
         collection_data = self.database.cabinet.find()
-        json_data = json.dumps(list(collection_data), indent=4, default=json_util.default)
+        json_data = json.dumps(
+            list(collection_data), indent=4, default=json_util.default
+        )
 
         try:
             # Ensure the directory exists and write the JSON data to cache
@@ -565,19 +586,24 @@ class Cabinet:
                 self.log(ERROR_CONFIG_BROKEN_EDITOR.replace("%", editor), level="error")
                 self._put_config("editor", "nano")
             else:
-                print(f"Error: Cache file not found in {self.path_file_cache} after cache update.")
+                print(
+                    f"Error: Cache file not found in {self.path_file_cache} after cache update."
+                )
         except subprocess.CalledProcessError:
             print(f"Error: Failed to open the file in '{editor}'.")
         except json.JSONDecodeError:
             self.log("Failed to parse the modified JSON data.", level="error")
             self.log("Refreshing cache with original data.", level="info")
-            self.write_file('cache.json', self.path_dir_config, json_data)
+            self.write_file("cache.json", self.path_dir_config, json_data)
         except Exception as error:  # pylint: disable=W0703
             print(f"Error: {str(error)}")
 
-    def edit_file(self, file_path: str | None = None,
-                create_if_not_exist: bool = True,
-                editor: str | None = None) -> None:
+    def edit_file(
+        self,
+        file_path: str | None = None,
+        create_if_not_exist: bool = True,
+        editor: str | None = None,
+    ) -> None:
         """
         Edit and save a file in Nano (default) or specified editor in `cabinet --config`.
 
@@ -620,8 +646,11 @@ class Cabinet:
         if path_edit and file_path in path_edit:
             item = self.get("path", "edit", file_path)
             if not isinstance(item, dict) or "value" not in item.keys():
-                self.log(f"Could not use shortcut for {file_path} in getItem(path -> edit); "
-                        f"should be a JSON object with value", level="warn")
+                self.log(
+                    f"Could not use shortcut for {file_path} in getItem(path -> edit); "
+                    f"should be a JSON object with value",
+                    level="warn",
+                )
             else:
                 file_path = item["value"]
 
@@ -658,7 +687,11 @@ class Cabinet:
         merged_data = {}
 
         for key, value in existing_data.items():
-            if key in new_data and isinstance(value, dict) and isinstance(new_data[key], dict):
+            if (
+                key in new_data
+                and isinstance(value, dict)
+                and isinstance(new_data[key], dict)
+            ):
                 merged_data[key] = self.merge_nested_data(value, new_data[key])
             else:
                 merged_data[key] = value
@@ -668,8 +701,7 @@ class Cabinet:
                 merged_data[key] = value
             else:
                 if isinstance(value, dict) and isinstance(merged_data[key], dict):
-                    merged_data[key] = self.merge_nested_data(
-                        merged_data[key], value)
+                    merged_data[key] = self.merge_nested_data(merged_data[key], value)
                 else:
                     merged_data[key] = value
 
@@ -687,14 +719,14 @@ class Cabinet:
             if value == "null":
                 return None
             try:
-                if '.' in str(value) or 'e' in str(value).lower():
+                if "." in str(value) or "e" in str(value).lower():
                     return float(value)
                 return int(value)
             except ValueError:
                 if isinstance(value, str):
-                    if value.lower() == 'true':
+                    if value.lower() == "true":
                         return True
-                    if value.lower() == 'false':
+                    if value.lower() == "false":
                         return False
                     try:
                         return ast.literal_eval(value)
@@ -735,8 +767,9 @@ class Cabinet:
             update = {"$set": {}}
 
             if len(attribute) > 2:
-                update["$set"][attribute[0]] = self.merge_nested_data(existing_data.get(
-                    attribute[0], {}), json_structure[attribute[0]])
+                update["$set"][attribute[0]] = self.merge_nested_data(
+                    existing_data.get(attribute[0], {}), json_structure[attribute[0]]
+                )
             else:
                 update = {"$set": json_structure}
 
@@ -744,13 +777,16 @@ class Cabinet:
         else:
             # write to ~/.cabinet/data.json
             with open(self.path_file_data, "w", encoding="utf-8") as file:
-                json.dump(self.merge_nested_data(existing_data, json_structure), file, indent=4)
+                json.dump(
+                    self.merge_nested_data(existing_data, json_structure),
+                    file,
+                    indent=4,
+                )
 
         if is_print:
             if self.mongodb_enabled:
                 print(f"Modified {result.modified_count} item(s)")
-                print(
-                    f"{' -> '.join(attribute[:-1])} set to {value}\n")
+                print(f"{' -> '.join(attribute[:-1])} set to {value}\n")
             else:
                 print(f"{' -> '.join(attribute[:-1])} set to {value}\n")
 
@@ -758,11 +794,16 @@ class Cabinet:
 
         return value
 
-    T = TypeVar('T', bound=Any)  # Generic type variable for return_type
-    def get(self, *attributes, warn_missing: bool = False, is_print: bool = False,
-        force_cache_update: bool = False,
-        return_type: Optional[Type[T]] = None) -> Union[T, Any, None]:
+    T = TypeVar("T", bound=Any)  # Generic type variable for return_type
 
+    def get(
+        self,
+        *attributes,
+        warn_missing: bool = False,
+        is_print: bool = False,
+        force_cache_update: bool = False,
+        return_type: Optional[Type[T]] = None,
+    ) -> Union[T, Any, None]:
         """
         Returns JSON-formatted data from local storage (~/.cabinet/data.json) or MongoDB,
         using a cache file to improve performance (if MongoDB enabled).
@@ -794,7 +835,9 @@ class Cabinet:
                         result = result[attribute]
                     else:
                         if warn_missing:
-                            self.log(f"Attribute '{attribute}' is missing", level="warn")
+                            self.log(
+                                f"Attribute '{attribute}' is missing", level="warn"
+                            )
                         return None
 
                 if is_print:
@@ -808,7 +851,10 @@ class Cabinet:
                     try:
                         return return_type(result)
                     except (ValueError, TypeError) as e:
-                        self.log(f"Error casting result to {return_type}: {str(e)}", level="error")
+                        self.log(
+                            f"Error casting result to {return_type}: {str(e)}",
+                            level="error",
+                        )
                         return None
                 else:
                     # If no specific return_type is needed, return as Any
@@ -818,10 +864,13 @@ class Cabinet:
         cache_update_needed = force_cache_update
 
         # Check if cache data is available and not expired
-        if not force_cache_update and hasattr(self, 'cached_data') \
-            and 'expiresAt' in self.cached_data:
+        if (
+            not force_cache_update
+            and hasattr(self, "cached_data")
+            and "expiresAt" in self.cached_data
+        ):
 
-            expires_at = datetime.fromisoformat(self.cached_data['expiresAt'])
+            expires_at = datetime.fromisoformat(self.cached_data["expiresAt"])
             cache_update_needed = datetime.now(timezone.utc) >= expires_at
 
         if cache_update_needed or not self.cached_data:
@@ -852,14 +901,19 @@ class Cabinet:
                 try:
                     return return_type(result)
                 except (ValueError, TypeError) as e:
-                    self.log(f"Error casting result to {return_type}: {str(e)}", level="error")
+                    self.log(
+                        f"Error casting result to {return_type}: {str(e)}",
+                        level="error",
+                    )
                     return None
             else:
                 # return as-is if no specific return_type is needed
                 return result  # type: ignore
 
         if warn_missing:
-            storage_type: str = "cache or MongoDB" if self.mongodb_enabled else "local storage"
+            storage_type: str = (
+                "cache or MongoDB" if self.mongodb_enabled else "local storage"
+            )
             self.log(f"'{attributes}' not found in {storage_type}", level="warn")
         return None
 
@@ -917,8 +971,15 @@ class Cabinet:
             print(f"Modified {result.modified_count} item(s)")
             print(f"{' -> '.join(attribute)} removed\n")
 
-    def log(self, message: str = '', log_name: str | None = None, level: str | None = None,
-        log_folder_path: str | None = None, is_quiet: bool = False) -> None:
+    def log(
+        self,
+        message: str = "",
+        log_name: str | None = None,
+        level: str | None = None,
+        log_folder_path: str | None = None,
+        is_quiet: bool = False,
+        tags: list[str] | None = None,
+    ) -> None:
         """
         Logs a message using the specified log level
         and writes it to a file if a file path is provided.
@@ -932,7 +993,14 @@ class Cabinet:
             log_folder_path (str, optional): The path to the log file.
                 If not provided, logs will be saved to MongoDB -> path -> log.
                 Defaults to None.
-            is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
+            is_quiet (bool, optional): 
+                If True, logging output will be silenced. 
+                If False, logging output will be printed to the console.
+                Defaults to False.
+            tags (list[str], optional):
+                A list of tags to associate with the log entry.
+                Tags are used to filter log entries.
+                Defaults to None.
 
         Raises:
             ValueError: If an invalid log level is provided.
@@ -945,22 +1013,24 @@ class Cabinet:
             raise ValueError("Message cannot be empty")
 
         if level is None:
-            level = 'info'
+            level = "info"
 
-        if level == 'warn':
-            level = 'warning'
+        if level == "warn":
+            level = "warning"
 
-        valid_levels = {'debug', 'info', 'warning', 'error', 'critical'}
+        valid_levels = {"debug", "info", "warning", "error", "critical"}
         if level.lower() not in valid_levels:
-            raise ValueError(f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}.")
+            raise ValueError(
+                f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}."
+            )
 
         # Set up color mapping for console output
         color_map = {
-            'debug': 'ansiwhite',
-            'info': 'ansigreen',
-            'warning': 'ansiyellow',
-            'error': 'ansired',
-            'critical': 'ansimagenta'
+            "debug": "ansiwhite",
+            "info": "ansigreen",
+            "warning": "ansiyellow",
+            "error": "ansired",
+            "critical": "ansimagenta",
         }
 
         # Custom console handler to only print colored level and message
@@ -968,18 +1038,19 @@ class Cabinet:
             """
             Allows for colorful console logs
             """
+
             def emit(self, record):
                 color = color_map[record.levelname.lower()]
                 msg = self.format(record)
                 escaped_msg = escape(msg)
 
-                print_formatted_text(HTML(f'<{color}>'
-                                        f'{record.levelname}: {escaped_msg}</{color}>'))
+                print_formatted_text(
+                    HTML(f"<{color}>" f"{record.levelname}: {escaped_msg}</{color}>")
+                )
 
         # Configure logger
         today = str(date.today())
-        log_folder_path = log_folder_path or \
-            os.path.join(self.path_dir_log, today)
+        log_folder_path = log_folder_path or os.path.join(self.path_dir_log, today)
         log_folder_path = os.path.expanduser(log_folder_path)
 
         if not os.path.exists(log_folder_path):
@@ -997,22 +1068,38 @@ class Cabinet:
             logger.handlers = []
 
         # File handler for writing complete logs
-        file_handler = logging.FileHandler(os.path.join(
-            log_folder_path, f"{log_name}.log"), mode='a')
+        file_handler = logging.FileHandler(
+            os.path.join(log_folder_path, f"{log_name}.log"), mode="a"
+        )
 
         # Determine the caller's filename and line number
+        caller_file = "unknown"
+        caller_line = 0
         stack = inspect.stack()
         for frame_info in stack:
             module = inspect.getmodule(frame_info.frame)
             module_name = module.__name__ if module else None
-            if module_name and module_name != __name__ and 'logging' not in module_name:
-                caller_file = os.path.join(os.path.basename(os.path.dirname(frame_info.filename)),
-                           os.path.basename(frame_info.filename))
+            if module_name and module_name != __name__ and "logging" not in module_name:
+                caller_file = os.path.join(
+                    os.path.basename(os.path.dirname(frame_info.filename)),
+                    os.path.basename(frame_info.filename),
+                )
                 caller_line = frame_info.lineno
                 break
 
-        file_handler.setFormatter(logging.Formatter(
-            f"%(asctime)s — %(levelname)s -> {caller_file}:{caller_line} -> %(message)s"))
+        hostname = socket.gethostname()
+
+        # Format tags if provided
+        tags_str = ""
+        if tags:
+            tags_str = f" [{','.join(tags)}]"
+
+        file_handler.setFormatter(
+            logging.Formatter(
+                f"%(asctime)s — %(levelname)s{tags_str} -> {caller_file}:{caller_line}"
+                f"@{hostname} -> %(message)s"
+            )
+        )
         logger.addHandler(file_handler)
 
         # Add color console handler if not is_quiet
@@ -1024,8 +1111,150 @@ class Cabinet:
         # Log the message
         getattr(logger, level.lower())(message)
 
-    def logdb(self, message: str = '', db_name: str | None = None, cluster_name: str | None = None,
-            collection_name: str = 'logs', level: str | None = None) -> None:
+    def log_query(
+        self,
+        log_file: str | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        hostname: str | None = None,
+        level: str | None = None,
+        date_filter: str | None = None,
+        message: str | None = None,
+    ) -> list[str]:
+        """
+        Query log files by various criteria.
+
+        Args:
+            log_file (str, optional): Path to the log file to search. Can be absolute or
+                relative to log directory. If not provided, defaults to today's log file.
+            tags (list[str], optional): List of tags to filter by. Returns logs
+                containing any of these tags.
+            path (str, optional): Fuzzy search on the file path (after the
+                arrow). Case-insensitive.
+            hostname (str, optional): Filter by hostname.
+            level (str, optional): Filter by log level (DEBUG, INFO, WARNING,
+                ERROR, CRITICAL).
+            date_filter (str, optional): Filter by date (YYYY-MM-DD format).
+            message (str, optional): Search within the message text.
+                Case-insensitive.
+
+        Returns:
+            list[str]: List of matching log lines.
+
+        Example:
+            >>> # Query today's log file
+            >>> cab.log_query(tags=["weather"], level="INFO")
+            
+            >>> # Query specific log file
+            >>> cab.log_query(
+            ...     "LOG_DAILY_2025-09-27.log",
+            ...     tags=["weather"],
+            ...     level="INFO"
+            ... )
+        """
+
+        # Default to today's log file if not provided
+        if log_file is None:
+            today = str(date.today())
+            log_file = f"LOG_DAILY_{today}.log"
+
+        # Resolve log file path
+        if not os.path.isabs(log_file):
+            # Try to find the log file in the log directory
+            if date_filter:
+                log_file_path = os.path.join(self.path_dir_log, date_filter, log_file)
+            else:
+                # Search in today's log directory by default
+                today = str(date.today())
+                log_file_path = os.path.join(self.path_dir_log, today, log_file)
+
+                # If not found in today's directory, search all date directories
+                if not os.path.exists(log_file_path):
+                    for date_dir in os.listdir(self.path_dir_log):
+                        potential_path = os.path.join(
+                            self.path_dir_log, date_dir, log_file
+                        )
+                        if os.path.exists(potential_path):
+                            log_file_path = potential_path
+                            break
+        else:
+            log_file_path = log_file
+
+        if not os.path.exists(log_file_path):
+            raise FileNotFoundError(f"Log file not found: {log_file_path}")
+
+        # Regular expression to parse log lines
+        # Format: timestamp — level [tags] -> path:line@hostname -> message
+        # Tags are optional
+        log_pattern = re.compile(
+            r"^(?P<timestamp>[^\s]+\s+[^\s]+)\s+—\s+(?P<level>\w+)"
+            r"(?:\s+\[(?P<tags>[^\]]+)\])?\s+->\s+"
+            r"(?P<path>[^:]+):(?P<line>\d+)@(?P<hostname>\S+)\s+->\s+"
+            r"(?P<message>.+)$"
+        )
+
+        matching_lines = []
+
+        try:
+            with open(log_file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    match = log_pattern.match(line)
+                    if not match:
+                        continue
+
+                    log_data = match.groupdict()
+
+                    # Apply filters
+                    if level and log_data["level"].upper() != level.upper():
+                        continue
+
+                    if hostname and log_data["hostname"] != hostname:
+                        continue
+
+                    if date_filter and not log_data["timestamp"].startswith(
+                        date_filter
+                    ):
+                        continue
+
+                    if message and message.lower() not in log_data["message"].lower():
+                        continue
+
+                    if path and path.lower() not in log_data["path"].lower():
+                        continue
+
+                    if tags:
+                        # Extract tags from log entry
+                        log_tags_str = log_data.get("tags", "")
+                        if log_tags_str:
+                            log_tags = [t.strip() for t in log_tags_str.split(",")]
+                            # Check if any of the requested tags are in the log tags
+                            if not any(tag in log_tags for tag in tags):
+                                continue
+                        else:
+                            # No tags in this log entry, skip it
+                            continue
+
+                    matching_lines.append(line)
+
+        except Exception as e:
+            raise RuntimeError(
+                f"Error reading log file {log_file_path}: {str(e)}"
+            ) from e
+
+        return matching_lines
+
+    def logdb(
+        self,
+        message: str = "",
+        db_name: str | None = None,
+        cluster_name: str | None = None,
+        collection_name: str = "logs",
+        level: str | None = None,
+    ) -> None:
         """
         Logs a message to MongoDB using the specified database and cluster names.
         Falls back to configured values if not provided.
@@ -1056,14 +1285,16 @@ class Cabinet:
             raise ValueError("Message cannot be empty")
 
         if level is None:
-            level = 'info'
+            level = "info"
 
-        if level == 'warn':
-            level = 'warning'
+        if level == "warn":
+            level = "warning"
 
-        valid_levels = {'debug', 'info', 'warning', 'error', 'critical'}
+        valid_levels = {"debug", "info", "warning", "error", "critical"}
         if level.lower() not in valid_levels:
-            raise ValueError(f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}.")
+            raise ValueError(
+                f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}."
+            )
 
         # Use provided values or fall back to configured ones
         db_name = db_name or self.mongodb_db_name
@@ -1077,10 +1308,15 @@ class Cabinet:
             for frame_info in stack:
                 module = inspect.getmodule(frame_info.frame)
                 module_name = module.__name__ if module else None
-                if module_name and module_name != __name__ and 'logging' not in module_name:
+                if (
+                    module_name
+                    and module_name != __name__
+                    and "logging" not in module_name
+                ):
                     caller_file = os.path.join(
                         os.path.basename(os.path.dirname(frame_info.filename)),
-                                            os.path.basename(frame_info.filename))
+                        os.path.basename(frame_info.filename),
+                    )
                     caller_line = frame_info.lineno
                     break
 
@@ -1089,10 +1325,7 @@ class Cabinet:
                 "timestamp": datetime.now(timezone.utc),
                 "level": level.upper(),
                 "message": message,
-                "source": {
-                    "file": caller_file,
-                    "line": caller_line
-                }
+                "source": {"file": caller_file, "line": caller_line},
             }
 
             # Insert the log entry
@@ -1100,15 +1333,17 @@ class Cabinet:
 
             # Print to console with color (matching the log method's behavior)
             color_map = {
-                'debug': 'ansiwhite',
-                'info': 'ansigreen',
-                'warning': 'ansiyellow',
-                'error': 'ansired',
-                'critical': 'ansimagenta'
+                "debug": "ansiwhite",
+                "info": "ansigreen",
+                "warning": "ansiyellow",
+                "error": "ansired",
+                "critical": "ansimagenta",
             }
             color = color_map[level.lower()]
             escaped_msg = escape(message)
-            print_formatted_text(HTML(f'<{color}>{level.upper()}: {escaped_msg}</{color}>'))
+            print_formatted_text(
+                HTML(f"<{color}>{level.upper()}: {escaped_msg}</{color}>")
+            )
 
         except pymongo.errors.InvalidURI as error:
             print(f"Invalid MongoDB URI: {error}")
@@ -1123,8 +1358,13 @@ class Cabinet:
             print(f"Unexpected error while logging to MongoDB: {error}")
             raise
 
-    def get_file_as_array(self, file_name: str, file_path: str = '', strip: bool = True,
-                          ignore_not_found: bool = False):
+    def get_file_as_array(
+        self,
+        file_name: str,
+        file_path: str = "",
+        strip: bool = True,
+        ignore_not_found: bool = False,
+    ):
         """
         Reads a file and returns its contents as a list of lines.
         The file is assumed to be encoded in UTF-8.
@@ -1145,10 +1385,10 @@ class Cabinet:
         if not file_path:
             file_path = self.path_dir_cabinet
         elif file_path == "notes":
-            file_path = self.get('path', 'notes') or "~/.cabinet/notes"
+            file_path = self.get("path", "notes") or "~/.cabinet/notes"
 
-        if not file_path[-1] == '/':
-            file_path += '/'
+        if not file_path[-1] == "/":
+            file_path += "/"
 
         try:
             content = open(file_path + file_name, "r", encoding="utf8").read()
@@ -1156,15 +1396,20 @@ class Cabinet:
             if strip:
                 content = content.strip()
 
-            return content.split('\n')
+            return content.split("\n")
         except FileNotFoundError as error:
             if not ignore_not_found:
                 self.log(f"get_file_as_array: {error}", level="error")
             return None
 
-    def write_file(self, file_name: str, path_file: str = '',
-                content: Optional[str] = None, append: bool = False,
-                is_quiet: bool = False) -> bool:
+    def write_file(
+        self,
+        file_name: str,
+        path_file: str = "",
+        content: Optional[str] = None,
+        append: bool = False,
+        is_quiet: bool = False,
+    ) -> bool:
         """
         Writes a file to the specified path, creating necessary subfolders.
         Resolves aliases in paths.
@@ -1189,9 +1434,10 @@ class Cabinet:
             if not path_file:
                 path_file = helpers.resolve_path(self.path_dir_log)
             elif path_file == "notes":
-                path_notes: str = self.get('path', 'notes', return_type=str) or ''
+                path_notes: str = self.get("path", "notes", return_type=str) or ""
                 path_file = helpers.resolve_path(
-                    path_notes or self.path_dir_log or '~/.cabinet/notes')
+                    path_notes or self.path_dir_log or "~/.cabinet/notes"
+                )
 
             # Create directory if it does not exist
             os.makedirs(path_file, exist_ok=True)
@@ -1201,14 +1447,14 @@ class Cabinet:
 
             # Check if appending and the file exists and is not empty
             if append and os.path.exists(full_path) and os.path.getsize(full_path) > 0:
-                with open(full_path, 'r+', encoding="utf8") as file:
+                with open(full_path, "r+", encoding="utf8") as file:
                     file.seek(0, os.SEEK_END)  # Move to the end of file
                     file.seek(file.tell() - 1, os.SEEK_SET)  # Move back one character
-                    if file.read(1) != '\n':
-                        content = '\n' + (content or "")
+                    if file.read(1) != "\n":
+                        content = "\n" + (content or "")
 
             # Write content to file
-            mode = 'a+' if append else 'w'
+            mode = "a+" if append else "w"
             with open(full_path, mode, encoding="utf8") as file:
                 file.write(content or "")
 
@@ -1227,7 +1473,7 @@ class Cabinet:
         """
         cache = self.update_cache()
 
-        path_export = pathlib.Path('~/.cabinet/export').expanduser()
+        path_export = pathlib.Path("~/.cabinet/export").expanduser()
 
         # Create the directory if it doesn't exist
         if not path_export.exists():
@@ -1237,10 +1483,11 @@ class Cabinet:
         formatted_datetime = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
         file_name = f"cabinet export {formatted_datetime}"
 
-        with open(path_export / file_name, 'w', encoding='utf-8') as file:
-            file.write(cache or '')
+        with open(path_export / file_name, "w", encoding="utf-8") as file:
+            file.write(cache or "")
 
         self.log(f"Exported to {path_export / file_name}")
+
 
 def main():
     """
@@ -1268,63 +1515,184 @@ def main():
 
         def __call__(self, parser, namespace, values, option_string=None):
             if not values or len(values) < 2:
-                if values and len(values) == 1 and values[0] == 'ut':
+                if values and len(values) == 1 and values[0] == "ut":
                     print("I think you meant to use '--put' or '-p'.\n")
-                parser.error(
-                    f"At least 2 arguments are required for {option_string}")
+                parser.error(f"At least 2 arguments are required for {option_string}")
             setattr(namespace, self.dest, values)
 
-    parser = argparse.ArgumentParser(
-        description=f"Cabinet ({version('cabinet')})")
+    parser = argparse.ArgumentParser(description=f"Cabinet ({version('cabinet')})")
 
-    parser.add_argument('--configure', '-config', dest='configure',
-                        action='store_true', help='Configure')
-    parser.add_argument('--edit', '-e', dest='edit', action='store_true',
-                        help='Edit Cabinet\'s MongoDB as a JSON file')
-    parser.add_argument('--edit-file', '-ef', type=str, dest='edit_file',
-                        help='Edit a specific file')
-    parser.add_argument('--force-cache-update', dest='force_cache_update', action='store_true',
-                    help='Disable using the cache for MongoDB queries')
-    parser.add_argument('--no-create', dest='create',
-                        action='store_false',
-                        help='(for -ef) Do not create file if it does not exist')
-    parser.add_argument('--get', '-g', dest='get', nargs='+',
-                        help='Get a property from MongoDB')
-    parser.add_argument('--put', '-p', dest='put', nargs='+', action=ValidatePutArgs,
-                        help='Put a property into MongoDB')
-    parser.add_argument('--remove', '-rm', dest='remove',
-                        nargs='+', help='Remove a property from MongoDB')
-    parser.add_argument('--get-file', dest='get_file',
-                        type=str, help='Get file')
-    parser.add_argument('--export', dest='export', action='store_true',
-                        help='Exports MongoDB to ~/.cabinet/export')
-    parser.add_argument('--strip', dest='strip', action='store_false',
-                        help='(for --get-file) Whether to strip file content whitespace')
-    parser.add_argument('--log', '-l', type=str,
-                        dest='log', help='Log a message to the default location')
-    parser.add_argument('--logdb', '-ldb', type=str,
-                        dest='logdb', help='Log a message to MongoDB')
-    parser.add_argument('--level', type=str, dest='log_level',
-                        help='(for -l) Log level [debug, info, warn, error, critical]')
-    parser.add_argument('--editor', type=str, dest='editor',
-                        help='(for --edit and --edit-file) Specify an editor to use')
-    parser.add_argument('--db-name', type=str, dest='db_name',
-                        help='(for --logdb) Specify a database name')
-    parser.add_argument('--cluster-name', type=str, dest='cluster_name',
-                        help='(for --logdb) Specify a cluster name')
+    parser.add_argument(
+        "--configure",
+        "-config",
+        dest="configure",
+        action="store_true",
+        help="Configure",
+    )
+    parser.add_argument(
+        "--edit",
+        "-e",
+        dest="edit",
+        action="store_true",
+        help="Edit Cabinet's MongoDB as a JSON file",
+    )
+    parser.add_argument(
+        "--edit-file", "-ef", type=str, dest="edit_file", help="Edit a specific file"
+    )
+    parser.add_argument(
+        "--force-cache-update",
+        dest="force_cache_update",
+        action="store_true",
+        help="Disable using the cache for MongoDB queries",
+    )
+    parser.add_argument(
+        "--no-create",
+        dest="create",
+        action="store_false",
+        help="(for -ef) Do not create file if it does not exist",
+    )
+    parser.add_argument(
+        "--get", "-g", dest="get", nargs="+", help="Get a property from MongoDB"
+    )
+    parser.add_argument(
+        "--put",
+        "-p",
+        dest="put",
+        nargs="+",
+        action=ValidatePutArgs,
+        help="Put a property into MongoDB",
+    )
+    parser.add_argument(
+        "--remove",
+        "-rm",
+        dest="remove",
+        nargs="+",
+        help="Remove a property from MongoDB",
+    )
+    parser.add_argument("--get-file", dest="get_file", type=str, help="Get file")
+    parser.add_argument(
+        "--export",
+        dest="export",
+        action="store_true",
+        help="Exports MongoDB to ~/.cabinet/export",
+    )
+    parser.add_argument(
+        "--strip",
+        dest="strip",
+        action="store_false",
+        help="(for --get-file) Whether to strip file content whitespace",
+    )
+    parser.add_argument(
+        "--log",
+        "-l",
+        type=str,
+        dest="log",
+        help="Log a message to the default location",
+    )
+    parser.add_argument(
+        "--logdb", "-ldb", type=str, dest="logdb", help="Log a message to MongoDB"
+    )
+    parser.add_argument(
+        "--level",
+        type=str,
+        dest="log_level",
+        help="(for -l) Log level [debug, info, warn, error, critical]",
+    )
+    parser.add_argument(
+        "--tags",
+        type=str,
+        dest="log_tags",
+        help="(for -l) Comma-separated list of tags to associate with the log entry",
+    )
+    parser.add_argument(
+        "--editor",
+        type=str,
+        dest="editor",
+        help="(for --edit and --edit-file) Specify an editor to use",
+    )
+    parser.add_argument(
+        "--db-name",
+        type=str,
+        dest="db_name",
+        help="(for --logdb) Specify a database name",
+    )
+    parser.add_argument(
+        "--cluster-name",
+        type=str,
+        dest="cluster_name",
+        help="(for --logdb) Specify a cluster name",
+    )
+    
+    # Log query arguments
+    parser.add_argument(
+        "--query",
+        "-q",
+        type=str,
+        dest="log_query_file",
+        nargs="?",
+        const="",
+        help="Query log files (optional: specify log file name, defaults to today)",
+    )
+    parser.add_argument(
+        "--query-tags",
+        type=str,
+        dest="query_tags",
+        help="(for --query) Comma-separated list of tags to filter by",
+    )
+    parser.add_argument(
+        "--query-path",
+        type=str,
+        dest="query_path",
+        help="(for --query) Filter by file path (fuzzy search)",
+    )
+    parser.add_argument(
+        "--query-hostname",
+        type=str,
+        dest="query_hostname",
+        help="(for --query) Filter by hostname",
+    )
+    parser.add_argument(
+        "--query-level",
+        type=str,
+        dest="query_level",
+        help="(for --query) Filter by log level [debug, info, warning, error, critical]",
+    )
+    parser.add_argument(
+        "--query-date",
+        type=str,
+        dest="query_date",
+        help="(for --query) Filter by date (YYYY-MM-DD format)",
+    )
+    parser.add_argument(
+        "--query-message",
+        type=str,
+        dest="query_message",
+        help="(for --query) Search within message text",
+    )
 
-    mail_group = parser.add_argument_group('Mail')
+    mail_group = parser.add_argument_group("Mail")
     mail_group.add_argument(
-        '--mail', dest='mail', action='store_true', help='Sends an email')
+        "--mail", dest="mail", action="store_true", help="Sends an email"
+    )
     mail_group.add_argument(
-        '--subject', '-s', dest='subject', required='--mail' in sys.argv, help='Email subject')
+        "--subject",
+        "-s",
+        dest="subject",
+        required="--mail" in sys.argv,
+        help="Email subject",
+    )
     mail_group.add_argument(
-        '--body', '-b', dest='body', required='--mail' in sys.argv, help='Email body')
-    mail_group.add_argument('--to', '-t', dest='to_addr',
-                            help='The "to" email address')
+        "--body", "-b", dest="body", required="--mail" in sys.argv, help="Email body"
+    )
+    mail_group.add_argument("--to", "-t", dest="to_addr", help='The "to" email address')
 
-    parser.add_argument('-v', '--version', action='version',
-                        help='Display the version of Cabinet', version=version('cabinet'))
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        help="Display the version of Cabinet",
+        version=version("cabinet"),
+    )
 
     args = parser.parse_args()
 
@@ -1333,12 +1701,18 @@ def main():
     elif args.edit:
         cab.edit_cabinet(editor=args.editor)
     elif args.edit_file:
-        cab.edit_file(file_path=args.edit_file,
-                      create_if_not_exist=args.create,
-                      editor=args.editor)
+        cab.edit_file(
+            file_path=args.edit_file,
+            create_if_not_exist=args.create,
+            editor=args.editor,
+        )
     elif args.get:
-        cab.get(is_print=True, warn_missing=True,
-                force_cache_update=args.force_cache_update, *args.get)
+        cab.get(
+            is_print=True,
+            warn_missing=True,
+            force_cache_update=args.force_cache_update,
+            *args.get,
+        )
     elif args.put:
         attribute_values = args.put
         cab.put(*attribute_values, is_print=True)
@@ -1346,22 +1720,59 @@ def main():
         attribute_values = args.remove
         cab.remove(*attribute_values, is_print=True)
     elif args.get_file:
-        cab.get_file_as_array(file_name=args.get_file,
-                              file_path='', strip=args.strip)
+        cab.get_file_as_array(file_name=args.get_file, file_path="", strip=args.strip)
     elif args.log:
-        cab.log(message=args.log, level=args.log_level)
+        # Parse comma-separated tags if provided
+        tags = None
+        if args.log_tags:
+            tags = [tag.strip() for tag in args.log_tags.split(",")]
+        cab.log(message=args.log, level=args.log_level, tags=tags)
     elif args.logdb:
-        cab.logdb(message=args.logdb, level=args.log_level,
-                  db_name=args.db_name, cluster_name=args.cluster_name)
+        cab.logdb(
+            message=args.logdb,
+            level=args.log_level,
+            db_name=args.db_name,
+            cluster_name=args.cluster_name,
+        )
+    elif args.log_query_file is not None:
+        # Parse query parameters
+        log_file = args.log_query_file if args.log_query_file else None
+        tags = None
+        if args.query_tags:
+            tags = [tag.strip() for tag in args.query_tags.split(",")]
+        
+        # Execute query
+        try:
+            results = cab.log_query(
+                log_file=log_file,
+                tags=tags,
+                path=args.query_path,
+                hostname=args.query_hostname,
+                level=args.query_level,
+                date_filter=args.query_date,
+                message=args.query_message,
+            )
+            
+            if results:
+                for result in results:
+                    print(result)
+                print(f"\nFound {len(results)} matching log entries")
+            else:
+                print("No matching log entries found")
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error querying logs: {e}")
     elif args.export:
         cab.export()
     elif args.mail:
         to_addr = None
         if args.to_addr:
-            to_addr = ''.join(args.to_addr).split(',')
+            to_addr = "".join(args.to_addr).split(",")
         Mail().send(args.subject, args.body, to_addr=to_addr)
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

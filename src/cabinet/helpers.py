@@ -4,6 +4,7 @@ A collection of helper functions
 
 import os
 
+
 def resolve_path(path: str) -> str:
     """
     Resolves path aliases and environment variables.

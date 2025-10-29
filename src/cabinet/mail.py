@@ -17,6 +17,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import cabinet
 
+
 class Mail:
     """
     Provides functionality for sending email using SMTP and MIMEText.
@@ -37,14 +38,17 @@ class Mail:
         self.username = self.cab.get("email", "from")
         self.password = self.cab.get("email", "from_pw")
 
-    def send(self, subject: str,
-             body: str,
-             signature: str = '',
-             to_addr = None, # should be List[str]; TODO update Cabinet to support type casting
-             from_name: str | None = None,
-             logging_enabled: bool = True,
-             is_quiet: bool = False,
-             timeout: int = 4) -> None:
+    def send(
+        self,
+        subject: str,
+        body: str,
+        signature: str = "",
+        to_addr=None,  # should be List[str]; TODO update Cabinet to support type casting
+        from_name: str | None = None,
+        logging_enabled: bool = True,
+        is_quiet: bool = False,
+        timeout: int = 4,
+    ) -> None:
         """
         Sends an email with the given subject and body to the specified recipients.
 
@@ -77,14 +81,16 @@ class Mail:
         cab_from_name = self.cab.get("email", "from_name") or hostname or "Cabinet"
 
         # send IP if reminder came directly from outside of server
-        client_name = os.getenv('SSH_CONNECTION')
+        client_name = os.getenv("SSH_CONNECTION")
 
         if client_name:
-            client_name = client_name.strip().replace('\n', '').replace('\r', '').split(" ")[0]
+            client_name = (
+                client_name.strip().replace("\n", "").replace("\r", "").split(" ")[0]
+            )
         else:
             client_name = ""
 
-        email_from = f'{cab_from_name}<br>{client_name}'
+        email_from = f"{cab_from_name}<br>{client_name}"
 
         # Set default `from_name` if unset.
         if from_name is None:
@@ -106,7 +112,7 @@ class Mail:
         message = MIMEMultipart()
         message["Subject"] = unquote(subject)
         message["From"] = from_name
-        message["To"] = (', ').join(to_addr)
+        message["To"] = (", ").join(to_addr)
         message.attach(MIMEText(unquote(body), "html"))
 
         if not self.smtp_server:
@@ -118,7 +124,9 @@ class Mail:
             return
 
         if not isinstance(self.port, int):
-            self.cab.log(f"Port is not an integer (received '{self.port}')", level="error")
+            self.cab.log(
+                f"Port is not an integer (received '{self.port}')", level="error"
+            )
             return
 
         server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
@@ -136,16 +144,19 @@ class Mail:
             if logging_enabled:
                 self.cab.log(
                     f"Sent Email to {message['To']} as {message['From']}: {subject}",
-                    is_quiet=is_quiet)
+                    is_quiet=is_quiet,
+                )
 
         except smtplib.SMTPAuthenticationError as err:
             self.cab.log(
                 f"Could not log into {self.username}; set this with Cabinet.\n\n{err}",
-                level="error")
+                level="error",
+            )
         except (socket.timeout, smtplib.SMTPServerDisconnected) as err:
             self.cab.log(
-                f"SMTP connection failed after {timeout} seconds: {err}",
-                level="error")
+                f"SMTP connection failed after {timeout} seconds: {err}", level="error"
+            )
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:

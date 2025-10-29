@@ -1,6 +1,8 @@
 """
 main entrypoint
 """
-from cabinet import Cabinet
 
-cab = Cabinet()
+from cabinet.cabinet import main
+
+if __name__ == "__main__":
+    main()

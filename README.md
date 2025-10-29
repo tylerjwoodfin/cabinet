@@ -21,6 +21,7 @@ Cabinet is a lightweight, flexible data organization tool that lets you manage y
     - [`edit_file`](#edit_file)
     - [`mail`](#mail-1)
     - [`log`](#log)
+    - [`log_query`](#log_query)
     - [`logdb`](#logdb)
   - [UI Module](#ui-module)
   - [Disclaimers](#disclaimers)
@@ -99,6 +100,21 @@ Options:
   --strip               (for --get-file) Whether to strip file content whitespace
   --log LOG, -l LOG     Log a message to the default location
   --level LOG_LEVEL     (for -l) Log level [debug, info, warn, error, critical]
+  --tags LOG_TAGS       (for -l) Comma-separated list of tags to associate with the log entry
+  --query [LOG_QUERY_FILE], -q [LOG_QUERY_FILE]
+                        Query log files (optional: specify log file name, defaults to today)
+  --query-tags QUERY_TAGS
+                        (for --query) Comma-separated list of tags to filter by
+  --query-path QUERY_PATH
+                        (for --query) Filter by file path (fuzzy search)
+  --query-hostname QUERY_HOSTNAME
+                        (for --query) Filter by hostname
+  --query-level QUERY_LEVEL
+                        (for --query) Filter by log level [debug, info, warning, error, critical]
+  --query-date QUERY_DATE
+                        (for --query) Filter by date (YYYY-MM-DD format)
+  --query-message QUERY_MESSAGE
+                        (for --query) Search within message text
   --editor EDITOR       (for --edit and --edit-file) Specify an editor to use
   -v, --version         Show version number and exit
 
@@ -365,14 +381,24 @@ cab.log("This function hit a breakpoint", level="debug")
 cab.log("Looks like the server is on fire", level="critical")
 cab.log("This is fine", level="info")
 
+# NEW: Log with tags (optional list of strings)
+cab.log("Checked weather successfully", tags=["weather"])
+cab.log("Starting Borg Backup...", tags=["backup", "start"])
+cab.log("Pruning repository", tags=["backup", "prune"])
+cab.log("Compacting repository", tags=["backup", "compact"])
+
 # writes to a file named LOG_TEMPERATURE in the default log directory
 cab.log("30", log_name="LOG_TEMPERATURE")
 
 # writes to a file named LOG_TEMPERATURE in ~/weather
 cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="~/weather")
 
-    # format
-    # 2021-12-29 19:29:27,896 — INFO — 30
+    # format (without tags)
+    # 2025-10-28 17:01:01,858 — INFO -> tools/weather.py:34@{hostname} -> Checking weather
+    
+    # format (with tags)
+    # 2025-09-27 02:01:09,012 — INFO [weather] -> tools/weather.py:116@cloud -> Checked weather successfully
+    # 2025-09-27 03:05:03,732 — INFO [backup,start] -> bin/cabinet:8@cloud -> Starting Borg Backup...
 
 ```
 
@@ -386,6 +412,96 @@ cabinet --log "Connection timed out"
 
 # change levels with --level
 cabinet --log "Server is on fire" --level "critical"
+
+# add tags with --tags (comma-separated)
+cabinet --log "Checked weather successfully" --tags "weather"
+cabinet --log "Starting Borg Backup..." --tags "backup,start"
+cabinet --log "Pruning repository" --level "info" --tags "backup,prune"
+```
+
+### `log_query`
+
+Query log files by various criteria including tags, path, hostname, level, date, and message content.
+
+python:
+```python
+from cabinet import Cabinet
+
+cab = Cabinet()
+
+# Query today's log file by tag (log_file is optional and defaults to today)
+results = cab.log_query(tags=["weather"])
+# Returns: ['2025-10-28 17:01:09,012 — INFO [weather] -> tools/weather.py:116@cloud -> Checked weather successfully']
+
+# Query by multiple tags in today's log (returns logs with any of these tags)
+results = cab.log_query(tags=["backup"])
+# Returns all logs with 'backup' tag from today
+
+# Query a specific date's log file
+results = cab.log_query("LOG_DAILY_2025-09-27.log", tags=["weather"])
+
+# Query by log level (in today's log)
+results = cab.log_query(level="ERROR")
+
+# Query by message content (case-insensitive fuzzy search)
+results = cab.log_query(message="repository")
+
+# Query by path (case-insensitive fuzzy search on file path after arrow)
+results = cab.log_query(path="cabinet")
+
+# Query by hostname
+results = cab.log_query(hostname="cloud")
+
+# Query by date (filters by timestamp in the log entry)
+results = cab.log_query(date_filter="2025-09-27")
+
+# Combine multiple filters on today's log
+results = cab.log_query(
+    tags=["backup"],
+    level="INFO",
+    message="repository"
+)
+
+# Combine multiple filters on specific log file
+results = cab.log_query(
+    "LOG_DAILY_2025-09-27.log",
+    tags=["backup"],
+    level="INFO",
+    message="repository"
+)
+```
+
+terminal:
+```bash
+# Query today's log (defaults to today if no log file specified)
+cabinet --query --query-tags "weather"
+
+# Short form
+cabinet -q --query-tags "backup"
+
+# Query by level
+cabinet --query --query-level "ERROR"
+
+# Query by message content
+cabinet --query --query-message "repository"
+
+# Query by path (fuzzy search)
+cabinet --query --query-path "tools"
+
+# Query by hostname
+cabinet --query --query-hostname "cloud"
+
+# Query by date
+cabinet --query --query-date "2025-10-28"
+
+# Combine multiple filters
+cabinet --query --query-tags "backup" --query-level "INFO"
+
+# Query specific log file
+cabinet --query "LOG_DAILY_2025-09-27.log" --query-tags "weather"
+
+# Complex query with multiple filters
+cabinet -q "LOG_DAILY_2025-09-27.log" --query-tags "backup,weather" --query-level "INFO" --query-message "repository"
 ```
 
 ### `logdb`
