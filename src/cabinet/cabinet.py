@@ -17,6 +17,7 @@ import os
 import ast
 import sys
 import json
+import re
 import logging
 import socket
 import pathlib
@@ -977,6 +978,7 @@ class Cabinet:
         level: str | None = None,
         log_folder_path: str | None = None,
         is_quiet: bool = False,
+        tags: list[str] | None = None,
     ) -> None:
         """
         Logs a message using the specified log level
@@ -991,7 +993,14 @@ class Cabinet:
             log_folder_path (str, optional): The path to the log file.
                 If not provided, logs will be saved to MongoDB -> path -> log.
                 Defaults to None.
-            is_quiet (bool, optional): If True, logging output will be silenced. Defaults to False.
+            is_quiet (bool, optional): 
+                If True, logging output will be silenced. 
+                If False, logging output will be printed to the console.
+                Defaults to False.
+            tags (list[str], optional):
+                A list of tags to associate with the log entry.
+                Tags are used to filter log entries.
+                Defaults to None.
 
         Raises:
             ValueError: If an invalid log level is provided.
@@ -1064,6 +1073,8 @@ class Cabinet:
         )
 
         # Determine the caller's filename and line number
+        caller_file = "unknown"
+        caller_line = 0
         stack = inspect.stack()
         for frame_info in stack:
             module = inspect.getmodule(frame_info.frame)
@@ -1077,9 +1088,15 @@ class Cabinet:
                 break
 
         hostname = socket.gethostname()
+
+        # Format tags if provided
+        tags_str = ""
+        if tags:
+            tags_str = f" [{','.join(tags)}]"
+
         file_handler.setFormatter(
             logging.Formatter(
-                f"%(asctime)s — %(levelname)s -> {caller_file}:{caller_line}"
+                f"%(asctime)s — %(levelname)s{tags_str} -> {caller_file}:{caller_line}"
                 f"@{hostname} -> %(message)s"
             )
         )
@@ -1093,6 +1110,142 @@ class Cabinet:
 
         # Log the message
         getattr(logger, level.lower())(message)
+
+    def log_query(
+        self,
+        log_file: str | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        hostname: str | None = None,
+        level: str | None = None,
+        date_filter: str | None = None,
+        message: str | None = None,
+    ) -> list[str]:
+        """
+        Query log files by various criteria.
+
+        Args:
+            log_file (str, optional): Path to the log file to search. Can be absolute or
+                relative to log directory. If not provided, defaults to today's log file.
+            tags (list[str], optional): List of tags to filter by. Returns logs
+                containing any of these tags.
+            path (str, optional): Fuzzy search on the file path (after the
+                arrow). Case-insensitive.
+            hostname (str, optional): Filter by hostname.
+            level (str, optional): Filter by log level (DEBUG, INFO, WARNING,
+                ERROR, CRITICAL).
+            date_filter (str, optional): Filter by date (YYYY-MM-DD format).
+            message (str, optional): Search within the message text.
+                Case-insensitive.
+
+        Returns:
+            list[str]: List of matching log lines.
+
+        Example:
+            >>> # Query today's log file
+            >>> cab.log_query(tags=["weather"], level="INFO")
+            
+            >>> # Query specific log file
+            >>> cab.log_query(
+            ...     "LOG_DAILY_2025-09-27.log",
+            ...     tags=["weather"],
+            ...     level="INFO"
+            ... )
+        """
+
+        # Default to today's log file if not provided
+        if log_file is None:
+            today = str(date.today())
+            log_file = f"LOG_DAILY_{today}.log"
+
+        # Resolve log file path
+        if not os.path.isabs(log_file):
+            # Try to find the log file in the log directory
+            if date_filter:
+                log_file_path = os.path.join(self.path_dir_log, date_filter, log_file)
+            else:
+                # Search in today's log directory by default
+                today = str(date.today())
+                log_file_path = os.path.join(self.path_dir_log, today, log_file)
+
+                # If not found in today's directory, search all date directories
+                if not os.path.exists(log_file_path):
+                    for date_dir in os.listdir(self.path_dir_log):
+                        potential_path = os.path.join(
+                            self.path_dir_log, date_dir, log_file
+                        )
+                        if os.path.exists(potential_path):
+                            log_file_path = potential_path
+                            break
+        else:
+            log_file_path = log_file
+
+        if not os.path.exists(log_file_path):
+            raise FileNotFoundError(f"Log file not found: {log_file_path}")
+
+        # Regular expression to parse log lines
+        # Format: timestamp — level [tags] -> path:line@hostname -> message
+        # Tags are optional
+        log_pattern = re.compile(
+            r"^(?P<timestamp>[^\s]+\s+[^\s]+)\s+—\s+(?P<level>\w+)"
+            r"(?:\s+\[(?P<tags>[^\]]+)\])?\s+->\s+"
+            r"(?P<path>[^:]+):(?P<line>\d+)@(?P<hostname>\S+)\s+->\s+"
+            r"(?P<message>.+)$"
+        )
+
+        matching_lines = []
+
+        try:
+            with open(log_file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    match = log_pattern.match(line)
+                    if not match:
+                        continue
+
+                    log_data = match.groupdict()
+
+                    # Apply filters
+                    if level and log_data["level"].upper() != level.upper():
+                        continue
+
+                    if hostname and log_data["hostname"] != hostname:
+                        continue
+
+                    if date_filter and not log_data["timestamp"].startswith(
+                        date_filter
+                    ):
+                        continue
+
+                    if message and message.lower() not in log_data["message"].lower():
+                        continue
+
+                    if path and path.lower() not in log_data["path"].lower():
+                        continue
+
+                    if tags:
+                        # Extract tags from log entry
+                        log_tags_str = log_data.get("tags", "")
+                        if log_tags_str:
+                            log_tags = [t.strip() for t in log_tags_str.split(",")]
+                            # Check if any of the requested tags are in the log tags
+                            if not any(tag in log_tags for tag in tags):
+                                continue
+                        else:
+                            # No tags in this log entry, skip it
+                            continue
+
+                    matching_lines.append(line)
+
+        except Exception as e:
+            raise RuntimeError(
+                f"Error reading log file {log_file_path}: {str(e)}"
+            ) from e
+
+        return matching_lines
 
     def logdb(
         self,
@@ -1446,6 +1599,12 @@ def main():
         help="(for -l) Log level [debug, info, warn, error, critical]",
     )
     parser.add_argument(
+        "--tags",
+        type=str,
+        dest="log_tags",
+        help="(for -l) Comma-separated list of tags to associate with the log entry",
+    )
+    parser.add_argument(
         "--editor",
         type=str,
         dest="editor",
@@ -1462,6 +1621,53 @@ def main():
         type=str,
         dest="cluster_name",
         help="(for --logdb) Specify a cluster name",
+    )
+    
+    # Log query arguments
+    parser.add_argument(
+        "--query",
+        "-q",
+        type=str,
+        dest="log_query_file",
+        nargs="?",
+        const="",
+        help="Query log files (optional: specify log file name, defaults to today)",
+    )
+    parser.add_argument(
+        "--query-tags",
+        type=str,
+        dest="query_tags",
+        help="(for --query) Comma-separated list of tags to filter by",
+    )
+    parser.add_argument(
+        "--query-path",
+        type=str,
+        dest="query_path",
+        help="(for --query) Filter by file path (fuzzy search)",
+    )
+    parser.add_argument(
+        "--query-hostname",
+        type=str,
+        dest="query_hostname",
+        help="(for --query) Filter by hostname",
+    )
+    parser.add_argument(
+        "--query-level",
+        type=str,
+        dest="query_level",
+        help="(for --query) Filter by log level [debug, info, warning, error, critical]",
+    )
+    parser.add_argument(
+        "--query-date",
+        type=str,
+        dest="query_date",
+        help="(for --query) Filter by date (YYYY-MM-DD format)",
+    )
+    parser.add_argument(
+        "--query-message",
+        type=str,
+        dest="query_message",
+        help="(for --query) Search within message text",
     )
 
     mail_group = parser.add_argument_group("Mail")
@@ -1516,7 +1722,11 @@ def main():
     elif args.get_file:
         cab.get_file_as_array(file_name=args.get_file, file_path="", strip=args.strip)
     elif args.log:
-        cab.log(message=args.log, level=args.log_level)
+        # Parse comma-separated tags if provided
+        tags = None
+        if args.log_tags:
+            tags = [tag.strip() for tag in args.log_tags.split(",")]
+        cab.log(message=args.log, level=args.log_level, tags=tags)
     elif args.logdb:
         cab.logdb(
             message=args.logdb,
@@ -1524,6 +1734,35 @@ def main():
             db_name=args.db_name,
             cluster_name=args.cluster_name,
         )
+    elif args.log_query_file is not None:
+        # Parse query parameters
+        log_file = args.log_query_file if args.log_query_file else None
+        tags = None
+        if args.query_tags:
+            tags = [tag.strip() for tag in args.query_tags.split(",")]
+        
+        # Execute query
+        try:
+            results = cab.log_query(
+                log_file=log_file,
+                tags=tags,
+                path=args.query_path,
+                hostname=args.query_hostname,
+                level=args.query_level,
+                date_filter=args.query_date,
+                message=args.query_message,
+            )
+            
+            if results:
+                for result in results:
+                    print(result)
+                print(f"\nFound {len(results)} matching log entries")
+            else:
+                print("No matching log entries found")
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error querying logs: {e}")
     elif args.export:
         cab.export()
     elif args.mail:
