@@ -372,7 +372,7 @@ cab.log("30", log_name="LOG_TEMPERATURE")
 cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="~/weather")
 
     # format
-    # 2021-12-29 19:29:27,896 — INFO — 30
+    # 2025-10-28 17:01:01,858 — INFO -> tools/weather.py:34@{hostname} -> Checking weather
 
 ```
 
