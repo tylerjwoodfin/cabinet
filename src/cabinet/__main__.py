@@ -2,6 +2,7 @@
 main entrypoint
 """
 
-from cabinet import Cabinet
+from cabinet.cabinet import main
 
-cab = Cabinet()
+if __name__ == "__main__":
+    main()
