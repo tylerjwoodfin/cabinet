@@ -96,13 +96,34 @@ class Mail:
         if from_name is None:
             from_name = f"{cab_from_name} <{self.username}>"
 
+        # Debug: Log the to_addr parameter as received
+        self.cab.log(
+            f"Mail.send() received to_addr: {to_addr} (type: {type(to_addr).__name__})",
+            level="info"
+        )
+
         # Set default `to_addr` if unset.
         if to_addr is None:
             to_addr = self.cab.get("email", "to")
+            self.cab.log(
+                f"Mail.send() using default from config: {to_addr}",
+                level="info"
+            )
 
             if to_addr is None:
                 self.cab.log("cabinet -> email -> to is unset", level="error")
                 return
+
+        # Ensure to_addr is a list
+        # Cabinet may return a string, but we need a list for join()
+        if isinstance(to_addr, str):
+            to_addr = [to_addr]
+
+        # Debug: Log the final to_addr being used
+        self.cab.log(
+            f"Mail.send() final to_addr: {to_addr} (type: {type(to_addr).__name__})",
+            level="debug"
+        )
 
         # Append `signature` to the `body` of the email.
         signature = signature or f"<br><br>Thanks,<br>{email_from}"
