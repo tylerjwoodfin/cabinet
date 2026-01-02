@@ -977,7 +977,7 @@ class Cabinet:
         log_name: str | None = None,
         level: str | None = None,
         log_folder_path: str | None = None,
-        is_quiet: bool = False,
+        is_quiet: bool | None = None,
         tags: list[str] | None = None,
     ) -> None:
         """
@@ -996,7 +996,7 @@ class Cabinet:
             is_quiet (bool, optional): 
                 If True, logging output will be silenced. 
                 If False, logging output will be printed to the console.
-                Defaults to False.
+                If None (default), defaults to True if level is Debug, otherwise False.
             tags (list[str], optional):
                 A list of tags to associate with the log entry.
                 Tags are used to filter log entries.
@@ -1017,6 +1017,10 @@ class Cabinet:
 
         if level == "warn":
             level = "warning"
+
+        # Default is_quiet to True if level is Debug (only if not explicitly set)
+        if is_quiet is None:
+            is_quiet = level.lower() == "debug"
 
         valid_levels = {"debug", "info", "warning", "error", "critical"}
         if level.lower() not in valid_levels:
