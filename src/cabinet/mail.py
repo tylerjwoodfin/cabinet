@@ -99,7 +99,7 @@ class Mail:
         # Debug: Log the to_addr parameter as received
         self.cab.log(
             f"Mail.send() received to_addr: {to_addr} (type: {type(to_addr).__name__})",
-            level="info"
+            level="debug"
         )
 
         # Set default `to_addr` if unset.
@@ -107,7 +107,7 @@ class Mail:
             to_addr = self.cab.get("email", "to")
             self.cab.log(
                 f"Mail.send() using default from config: {to_addr}",
-                level="info"
+                level="debug"
             )
 
             if to_addr is None:
@@ -118,6 +118,10 @@ class Mail:
         # Cabinet may return a string, but we need a list for join()
         if isinstance(to_addr, str):
             to_addr = [to_addr]
+
+        # Remove duplicates while preserving order
+        seen = set()
+        to_addr = [addr for addr in to_addr if addr not in seen and not seen.add(addr)]
 
         # Debug: Log the final to_addr being used
         self.cab.log(
@@ -150,13 +154,28 @@ class Mail:
             )
             return
 
-        server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
-
+        # Port 465 uses SSL/TLS directly, port 587 uses STARTTLS
+        server = None
         try:
+            if self.port == 465:
+                server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
+            elif self.port == 587:
+                server = smtplib.SMTP(self.smtp_server, self.port, timeout=timeout)
+                server.starttls()
+            else:
+                # Default to SSL for other ports (backward compatibility)
+                server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
 
             if not self.username or not self.password:
                 self.cab.log("Username/password not set", level="error")
                 return
+            
+            # Debug: Log the username being used (without password)
+            self.cab.log(
+                f"Attempting SMTP login with username: {self.username}",
+                level="debug"
+            )
+            
             server.login(self.username, self.password)
 
             # Send the email.
@@ -170,13 +189,29 @@ class Mail:
 
         except smtplib.SMTPAuthenticationError as err:
             self.cab.log(
-                f"Could not log into {self.username}; set this with Cabinet.\n\n{err}",
+                f"SMTP authentication failed for {self.username}.\n"
+                f"Error: {err}\n"
+                f"For Proton Mail, ensure:\n"
+                f"  1. Username matches the email address used when generating the SMTP token\n"
+                f"  2. Password is the SMTP token (not your regular password)\n"
+                f"  3. Token was generated for the correct email address",
                 level="error",
             )
         except (socket.timeout, smtplib.SMTPServerDisconnected) as err:
             self.cab.log(
                 f"SMTP connection failed after {timeout} seconds: {err}", level="error"
             )
+        finally:
+            # Always close the SMTP connection to prevent connection reuse issues
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    # If quit() fails, try close() as fallback
+                    try:
+                        server.close()
+                    except Exception:
+                        pass  # Connection may already be closed
 
 
 if __name__ == "__main__":

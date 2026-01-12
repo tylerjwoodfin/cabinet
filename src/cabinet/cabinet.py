@@ -874,7 +874,7 @@ class Cabinet:
             cache_update_needed = datetime.now(timezone.utc) >= expires_at
 
         if cache_update_needed or not self.cached_data:
-            self.update_cache(force=force_cache_update)
+            self.update_cache()
 
         # Process the cached data
         for document in self.cached_data:
