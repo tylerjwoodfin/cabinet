@@ -99,7 +99,7 @@ class Mail:
         # Debug: Log the to_addr parameter as received
         self.cab.log(
             f"Mail.send() received to_addr: {to_addr} (type: {type(to_addr).__name__})",
-            level="info"
+            level="debug"
         )
 
         # Set default `to_addr` if unset.
@@ -107,7 +107,7 @@ class Mail:
             to_addr = self.cab.get("email", "to")
             self.cab.log(
                 f"Mail.send() using default from config: {to_addr}",
-                level="info"
+                level="debug"
             )
 
             if to_addr is None:
