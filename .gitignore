@@ -7,3 +7,4 @@ src/cabinet.egg-info
 database.json
 cache.json
 build/
+.cache
