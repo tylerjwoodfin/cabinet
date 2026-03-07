@@ -17,6 +17,7 @@ Cabinet is a lightweight, flexible data organization tool that lets you manage y
     - [`put`](#put)
     - [`get`](#get)
     - [`remove`](#remove)
+    - [`append`](#append)
     - [`edit`](#edit)
     - [`edit_file`](#edit_file)
     - [`mail`](#mail-1)
@@ -93,6 +94,8 @@ Options:
                         Get a property from MongoDB
   --put PUT [PUT ...], -p PUT [PUT ...]
                         Put a property into MongoDB
+  --append APPEND [APPEND ...], -a APPEND [APPEND ...]
+                        Append to a string or array
   --remove REMOVE [REMOVE ...], -rm REMOVE [REMOVE ...]
                         Remove a property from MongoDB
   --get-file GET_FILE   Get file
@@ -294,6 +297,44 @@ results in this structure in MongoDB:
     }
 }
 ```
+
+### `append`
+
+Appends a value to an existing string (concatenation) or array. For other types (bool, int, float, etc.), prints a graceful error. Prints the updated value.
+
+python:
+```python
+from cabinet import Cabinet
+
+cab = Cabinet()
+
+# Append to array: ['apple'] -> ['apple', 'banana']
+cab.put("fruits", ["apple"])
+cab.append("fruits", "banana", is_print=True)
+
+# Append to string: 'apple' -> 'applebanana'
+cab.put("fruits", "apple")
+cab.append("fruits", "banana", is_print=True)
+```
+
+or terminal:
+```bash
+# Append to array: ['apple'] -> ['apple', 'banana']
+cabinet -p fruits '["apple"]'
+cabinet -a fruits banana
+
+# Append to string: 'apple' -> 'applebanana'
+cabinet -p fruits apple
+cabinet -a fruits banana
+
+# Nested paths
+cabinet -a person tyler fruits banana
+```
+
+- **Arrays:** Adds the value as a new element. `['apple']` → `['apple', 'banana']`
+- **Strings:** Concatenates. `'apple'` → `'applebanana'`
+- **Other types:** Not allowed.
+- **Missing key:** Not allowed.
 
 ### `edit`
 

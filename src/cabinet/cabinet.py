@@ -794,6 +794,62 @@ class Cabinet:
 
         return value
 
+    def append(self, *attribute, value=None, is_print: bool = False):
+        """
+        Appends a value to an existing string (concatenation) or array.
+        For other types (bool, int, float, etc.), prints a graceful error.
+
+        Args:
+            *attribute: The path to the key (e.g., 'fruits' or 'person', 'tyler', 'fruits').
+                The last element is the value to append when value is None.
+            value: The value to append. If None, the last element of attribute is used.
+            is_print: Whether to print the updated value.
+
+        Returns:
+            The updated value, or None on error.
+
+        Example:
+            append('fruits', 'banana')  # ['apple'] -> ['apple', 'banana']
+            append('fruits', 'banana')  # 'apple' -> 'applebanana'
+        """
+        if not attribute or len(attribute) < 2:
+            self.log("append requires at least a key path and value to append", level="error")
+            return None
+
+        if value is None:
+            value = attribute[-1]
+            path = attribute[:-1]
+        else:
+            path = attribute
+
+        current = self.get(*path, warn_missing=True)
+        if current is None:
+            self.log("Cannot append: key does not exist", level="error")
+            return None
+
+        if isinstance(current, list):
+            new_value = current + [value]
+        elif isinstance(current, str):
+            new_value = current + str(value)
+        else:
+            type_name = type(current).__name__
+            self.log(
+                f"Cannot append to type {type_name}; only str and list are supported",
+                level="error",
+            )
+            return None
+
+        self.put(*path, value=new_value, is_print=False)
+        self.update_cache()
+
+        if is_print:
+            if isinstance(new_value, (list, dict)):
+                print(json.dumps(new_value, indent=4))
+            else:
+                print(new_value)
+
+        return new_value
+
     T = TypeVar("T", bound=Any)  # Generic type variable for return_type
 
     def get(
@@ -1524,6 +1580,17 @@ def main():
                 parser.error(f"At least 2 arguments are required for {option_string}")
             setattr(namespace, self.dest, values)
 
+    class ValidateAppendArgs(argparse.Action):
+        """
+        Custom argparse action to validate the number of arguments for the --append option.
+        Ensures that a minimum of 2 arguments are provided (key path and value to append).
+        """
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            if not values or len(values) < 2:
+                parser.error(f"At least 2 arguments are required for {option_string}")
+            setattr(namespace, self.dest, values)
+
     parser = argparse.ArgumentParser(description=f"Cabinet ({version('cabinet')})")
 
     parser.add_argument(
@@ -1565,6 +1632,14 @@ def main():
         nargs="+",
         action=ValidatePutArgs,
         help="Put a property into MongoDB",
+    )
+    parser.add_argument(
+        "--append",
+        "-a",
+        dest="append",
+        nargs="+",
+        action=ValidateAppendArgs,
+        help="Append to a string or array (e.g., cabinet -a fruits banana)",
     )
     parser.add_argument(
         "--remove",
@@ -1720,6 +1795,9 @@ def main():
     elif args.put:
         attribute_values = args.put
         cab.put(*attribute_values, is_print=True)
+    elif args.append:
+        attribute_values = args.append
+        cab.append(*attribute_values, is_print=True)
     elif args.remove:
         attribute_values = args.remove
         cab.remove(*attribute_values, is_print=True)
