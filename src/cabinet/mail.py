@@ -15,6 +15,7 @@ import sys
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from prompt_toolkit import print_formatted_text, HTML
 import cabinet
 
 
@@ -184,8 +185,10 @@ class Mail:
             if logging_enabled:
                 self.cab.log(
                     f"Sent Email to {message['To']} as {message['From']}: {subject}",
-                    is_quiet=is_quiet,
+                    level="debug",
                 )
+            if not is_quiet:
+                print_formatted_text(HTML("<ansigreen><b>Email sent.</b></ansigreen>"))
 
         except smtplib.SMTPAuthenticationError as err:
             self.cab.log(
