@@ -1314,6 +1314,7 @@ class Cabinet:
         cluster_name: str | None = None,
         collection_name: str = "logs",
         level: str | None = None,
+        is_quiet: bool = False,
     ) -> None:
         """
         Logs a message to MongoDB using the specified database and cluster names.
@@ -1330,7 +1331,8 @@ class Cabinet:
             level (str, optional): The log level to use.
                 Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
                 Defaults to 'info'.
-
+            is_quiet (bool, optional): Whether to suppress console output.
+                Defaults to False.
         Raises:
             ValueError: If an invalid log level is provided or MongoDB is not enabled.
             pymongo.errors.PyMongoError: If there is an error connecting to MongoDB.
@@ -1401,10 +1403,10 @@ class Cabinet:
             }
             color = color_map[level.lower()]
             escaped_msg = escape(message)
-            print_formatted_text(
-                HTML(f"<{color}>{level.upper()}: {escaped_msg}</{color}>")
-            )
-
+            if not is_quiet:
+                print_formatted_text(
+                    HTML(f"<{color}>{level.upper()}: {escaped_msg}</{color}>")
+                )
         except pymongo.errors.InvalidURI as error:
             print(f"Invalid MongoDB URI: {error}")
             raise
