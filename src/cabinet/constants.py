@@ -100,6 +100,10 @@ ERROR_MONGODB_TIMEOUT = """
 Timeout error: Could not connect to the MongoDB server:
 """
 
+ERROR_MONGODB_OPERATION_TIMEOUT = (
+    "MongoDB operation timed out after 5 seconds. Connection may be unreachable."
+)
+
 ERROR_MONGODB_DNS = """
 DNS resolution failed for MongoDB server:
 """
@@ -127,3 +131,10 @@ Cabinet's data file at ~/.cabinet/data.json is missing.
 
 Creating a new one. Press Enter to continue (CTRL+C to exit).
 """
+
+WARN_NETWORK_TIMEOUT_FALLBACK = (
+    "MongoDB connection took longer than 5 seconds. Using cached data from {}."
+)
+WARN_NETWORK_TIMEOUT_NO_CACHE = (
+    "MongoDB connection took longer than 5 seconds. No cache available."
+)

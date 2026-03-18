@@ -20,6 +20,7 @@ import json
 import re
 import logging
 import socket
+import threading
 import pathlib
 import argparse
 import subprocess
@@ -51,8 +52,11 @@ from .constants import (
     ERROR_CONFIG_BROKEN_EDITOR,
     ERROR_LOCAL_STORAGE_JSON_DECODE,
     ERROR_MONGODB_TIMEOUT,
+    ERROR_MONGODB_OPERATION_TIMEOUT,
     ERROR_MONGODB_DNS,
     WARN_LOCAL_STORAGE_PATH,
+    WARN_NETWORK_TIMEOUT_FALLBACK,
+    WARN_NETWORK_TIMEOUT_NO_CACHE,
 )
 from .mail import Mail
 
@@ -78,6 +82,32 @@ class Cabinet:
     editor: str = "nano"
     cached_data: dict = {}
     is_new_setup: bool = False
+
+    _MONGODB_TIMEOUT_SECONDS = 5
+
+    def _mongodb_with_timeout(self, operation, timeout: int | None = None):
+        """
+        Run a MongoDB operation in a daemon thread with timeout.
+        Raises ConnectionFailure if the operation exceeds the timeout.
+        """
+        timeout = timeout or self._MONGODB_TIMEOUT_SECONDS
+        result: list[Any] = [None]
+        exception: list[BaseException | None] = [None]
+
+        def _run() -> None:
+            try:
+                result[0] = operation()
+            except BaseException as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            raise ConnectionFailure(ERROR_MONGODB_OPERATION_TIMEOUT)
+        if exception[0] is not None:
+            raise exception[0]
+        return result[0]
 
     def _get_config(self, key=None, warn_missing=True):
         """
@@ -330,17 +360,19 @@ class Cabinet:
 
             setattr(self, key, value)
 
-        # derive cluster from mongodb_connection_string
-        if self.mongodb_connection_string:
+        # derive cluster from mongodb_connection_string (Atlas format: ...@cluster.xxx.mongodb.net)
+        if self.mongodb_connection_string and "@" in self.mongodb_connection_string:
             try:
                 self.mongodb_cluster_name = self.mongodb_connection_string.split("@")[
                     1
                 ].split(".")[0]
             except IndexError:
-                self.log(
-                    "Could not get cluster from mongodb_connection_string", level="warn"
-                )
-                self.mongodb_cluster_name = "unknown"
+                pass
+        if not self.mongodb_cluster_name:
+            self.mongodb_cluster_name = (
+                self._get_config("mongodb_cluster_name", warn_missing=False)
+                or "local"
+            )
 
         # check for missing relevant keys
         keys.remove("path_dir_log")
@@ -512,10 +544,41 @@ class Cabinet:
                     self.cached_data = json.load(cache_file)
                 return None
 
-        collection_data = self.database.cabinet.find()
-        json_data = json.dumps(
-            list(collection_data), indent=4, default=json_util.default
-        )
+        result: list[str | None] = [None]
+        exception: list[BaseException | None] = [None]
+
+        def _fetch_from_mongodb() -> None:
+            try:
+                collection_data = self.database.cabinet.find()
+                result[0] = json.dumps(
+                    list(collection_data), indent=4, default=json_util.default
+                )
+            except BaseException as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=_fetch_from_mongodb, daemon=True)
+        thread.start()
+        thread.join(timeout=5)
+        if thread.is_alive():
+            if os.path.exists(path):
+                cache_mtime = datetime.fromtimestamp(os.path.getmtime(path))
+                self.log(
+                    WARN_NETWORK_TIMEOUT_FALLBACK.format(
+                        cache_mtime.strftime("%Y-%m-%d %H:%M")
+                    ),
+                    level="warn",
+                )
+                with open(path, "r", encoding="utf-8") as cache_file:
+                    self.cached_data = json.load(cache_file)
+            else:
+                self.log(WARN_NETWORK_TIMEOUT_NO_CACHE, level="warn")
+                self.cached_data = []
+            return None
+
+        if exception[0] is not None:
+            raise exception[0]
+
+        json_data = result[0]
 
         try:
             # Ensure the directory exists and write the JSON data to cache
@@ -574,8 +637,16 @@ class Cabinet:
                 document.pop("_id", None)  # Remove the existing _id field
                 document["_id"] = ObjectId()  # Assign a new ObjectId
 
-            self.database.cabinet.drop()  # Drop the existing collection
-            self.database.cabinet.insert_many(modified_data)  # Insert the modified data
+            try:
+                self._mongodb_with_timeout(
+                    lambda: (
+                        self.database.cabinet.drop(),
+                        self.database.cabinet.insert_many(modified_data),
+                    )
+                )
+            except ConnectionFailure as e:
+                self.log(str(e), level="error")
+                return
 
             print("Data in the collection has been updated.")
 
@@ -752,7 +823,13 @@ class Cabinet:
                 print(error)
 
         if self.mongodb_enabled:
-            existing_data = self.database.cabinet.find_one({}, {"_id": 0})
+            try:
+                existing_data = self._mongodb_with_timeout(
+                    lambda: self.database.cabinet.find_one({}, {"_id": 0})
+                )
+            except ConnectionFailure as e:
+                self.log(str(e), level="error")
+                return None
         else:
             # read from ~/.cabinet/data.json
             with open(self.path_file_data, "r", encoding="utf-8") as file:
@@ -773,7 +850,13 @@ class Cabinet:
             else:
                 update = {"$set": json_structure}
 
-            result = self.database.cabinet.update_many(custom_filter, update)
+            try:
+                result = self._mongodb_with_timeout(
+                    lambda: self.database.cabinet.update_many(custom_filter, update)
+                )
+            except ConnectionFailure as e:
+                self.log(str(e), level="error")
+                return None
         else:
             # write to ~/.cabinet/data.json
             with open(self.path_file_data, "w", encoding="utf-8") as file:
@@ -1008,7 +1091,9 @@ class Cabinet:
             update = {"$unset": json_structure}
 
         try:
-            result = self.database.cabinet.update_many(custom_filter, update)
+            result = self._mongodb_with_timeout(
+                lambda: self.database.cabinet.update_many(custom_filter, update)
+            )
         except ConnectionFailure as e:
             print(f"Connection failure: {e}")
             return
@@ -1391,7 +1476,9 @@ class Cabinet:
             }
 
             # Insert the log entry
-            self.database[collection_name].insert_one(log_entry)
+            self._mongodb_with_timeout(
+                lambda: self.database[collection_name].insert_one(log_entry)
+            )
 
             # Print to console with color (matching the log method's behavior)
             color_map = {
