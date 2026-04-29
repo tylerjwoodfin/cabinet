@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Example demonstrating the use of tags in logging and log_query function.
+Example demonstrating the use of tags in logging and log_query.
 """
 from cabinet import Cabinet
 
