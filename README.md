@@ -162,7 +162,7 @@ Mail:
 
 - Configuration data is stored in `~/.config/cabinet/config.json`.
 - Upon first launch, the tool will walk you through each option.
-  - `path_dir_log` is the **local** directory where logs are stored on **this machine** by default. **Do not** put this under Syncthing, NFS, or other shared folders (see [Logging and Loki](#logging-and-loki-optional)). A practical default is **`~/.local/share/cabinet/log`**, which stays off most Syncthing profiles even if you sync `~/.cabinet`.
+  - `path_dir_log` is the **local** directory where logs are stored on **this machine** by default. If this is a multi-machine setup, **do not** put this under Syncthing, NFS, or other shared folders (see [Logging and Loki](#logging-and-loki-optional)). A practical default is **`~/.local/share/cabinet/log`**, which stays off most Syncthing profiles even if you sync `~/.cabinet`.
   - `mongodb_enabled` is a boolean that determines whether MongoDB is used.
   - `mongodb_db_name` is the name of the database you want to use by default.
   - `mongodb_connection_string` is the connection string for MongoDB.
