@@ -1,40 +1,30 @@
 """
-Logging helpers for Cabinet: file and MongoDB backends, and log querying.
+Logging helpers for Cabinet: file logging (source of truth), optional JSON lines for
+Promtail/Loki.
 """
 
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import re
 import socket
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import TYPE_CHECKING, Any
 
-from pymongo import ASCENDING
-from pymongo.errors import CollectionInvalid, OperationFailure
 from prompt_toolkit import HTML, print_formatted_text
-
-from . import helpers
 
 if TYPE_CHECKING:
     from .cabinet import Cabinet
 
-DEFAULT_MONGO_LOG_COLLECTION = "log"
-# TTL on `timestamp`: MongoDB deletes documents this many seconds after `timestamp`.
-LOG_TTL_DAYS = 90
-LOG_TTL_SECONDS = int(timedelta(days=LOG_TTL_DAYS).total_seconds())
-LOG_TTL_INDEX_NAME = "cabinet_log_timestamp_ttl"
-_log_ttl_index_ensured: set[tuple[int, str]] = set()
-
 VALID_LOG_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
-
-# Severity levels included by :func:`cabinet_log_query_issues` (warning and above).
-_LOG_QUERY_ISSUE_LEVELS = ("critical", "error", "warning")
-
 
 def normalize_level(level: str | None) -> str:
     if level is None:
@@ -75,6 +65,24 @@ def _resolve_caller(skip_prefixes: tuple[str, ...]) -> tuple[str, int]:
     return caller_file, caller_line
 
 
+def _loki_jsonl_enabled(cabinet: Cabinet) -> bool:
+    """True when ``logging_loki_enabled`` is explicitly set True on the instance."""
+    try:
+        val = object.__getattribute__(cabinet, "logging_loki_enabled")
+    except AttributeError:
+        return False
+    return val is True
+
+
+def _append_jsonl_line(
+    jsonl_path: str,
+    record: dict[str, Any],
+) -> None:
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with open(jsonl_path, "a", encoding="utf-8") as jf:
+        jf.write(line)
+
+
 def _emit_console(level: str, message: str, is_quiet: bool) -> None:
     color_map = {
         "debug": "ansiwhite",
@@ -97,65 +105,6 @@ def _since_to_utc_cutoff(since: timedelta | datetime) -> datetime:
     return since.astimezone(timezone.utc)
 
 
-def _ensure_log_ttl_index(cabinet: Cabinet, collection_name: str) -> None:
-    cache_key = (id(cabinet.database), collection_name)
-    if cache_key in _log_ttl_index_ensured:
-        return
-    coll = cabinet.database[collection_name]
-    coll.create_index(
-        [("timestamp", ASCENDING)],
-        expireAfterSeconds=LOG_TTL_SECONDS,
-        name=LOG_TTL_INDEX_NAME,
-    )
-    _log_ttl_index_ensured.add(cache_key)
-
-
-def _insert_log_document(
-    cabinet: Cabinet, collection_name: str, log_entry: dict[str, Any]
-) -> None:
-    try:
-        cabinet.database.create_collection(collection_name)
-    except CollectionInvalid:
-        # pymongo raises this when the collection already exists (vs. OperationFailure on some servers).
-        pass
-    except OperationFailure as exc:
-        # 48 == NamespaceExists — collection already present (race or prior create).
-        if getattr(exc, "code", None) != 48:
-            raise
-
-    _ensure_log_ttl_index(cabinet, collection_name)
-    cabinet.database[collection_name].insert_one(log_entry)
-
-
-def write_log_mongo(
-    cabinet: Cabinet,
-    message: str,
-    level: str,
-    *,
-    is_quiet: bool,
-    tags: list[str] | None,
-    collection_name: str,
-) -> None:
-    caller_file, caller_line = _resolve_caller(
-        ("cabinet.cabinet", "cabinet.log"),
-    )
-    hostname = socket.gethostname()
-    log_entry: dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc),
-        "level": level.upper(),
-        "message": message,
-        "source": {"file": caller_file, "line": caller_line},
-        "hostname": hostname,
-    }
-    if tags:
-        log_entry["tags"] = list(tags)
-
-    cabinet._mongodb_with_timeout(  # pylint: disable=protected-access
-        lambda: _insert_log_document(cabinet, collection_name, log_entry)
-    )
-    _emit_console(level, message, is_quiet)
-
-
 def write_log_file(
     cabinet: Cabinet,
     message: str,
@@ -166,66 +115,90 @@ def write_log_file(
     is_quiet: bool,
     tags: list[str] | None,
 ) -> None:
-    color_map = {
-        "debug": "ansiwhite",
-        "info": "ansigreen",
-        "warning": "ansiyellow",
-        "error": "ansired",
-        "critical": "ansimagenta",
-    }
+    """
+    Append one line to the classic Cabinet log file. Never raises.
 
-    class ColorConsoleHandler(logging.StreamHandler):
-        def emit(self, record):
-            color = color_map[record.levelname.lower()]
-            msg = self.format(record)
-            escaped_msg = escape(msg)
-            print_formatted_text(
-                HTML(f"<{color}>{record.levelname}: {escaped_msg}</{color}>")
-            )
+    When ``cabinet.logging_loki_enabled`` is True, also appends a JSON line to a sibling
+    ``.jsonl`` file for Promtail → Loki (filesystem only; no HTTP).
+    """
+    try:
+        color_map = {
+            "debug": "ansiwhite",
+            "info": "ansigreen",
+            "warning": "ansiyellow",
+            "error": "ansired",
+            "critical": "ansimagenta",
+        }
 
-    today = str(date.today())
-    resolved_folder = log_folder_path or os.path.join(cabinet.path_dir_log, today)
-    resolved_folder = os.path.expanduser(resolved_folder)
+        class ColorConsoleHandler(logging.StreamHandler):
+            def emit(self, record):
+                color = color_map[record.levelname.lower()]
+                msg = self.format(record)
+                escaped_msg = escape(msg)
+                print_formatted_text(
+                    HTML(f"<{color}>{record.levelname}: {escaped_msg}</{color}>")
+                )
 
-    if not os.path.exists(resolved_folder):
-        os.makedirs(resolved_folder)
+        today = str(date.today())
+        resolved_folder = log_folder_path or os.path.join(cabinet.path_dir_log, today)
+        resolved_folder = os.path.expandvars(os.path.expanduser(resolved_folder))
 
-    resolved_log_name = log_name if log_name is not None else f"LOG_DAILY_{today}"
+        if not os.path.exists(resolved_folder):
+            os.makedirs(resolved_folder)
 
-    logger = logging.getLogger(resolved_log_name)
-    logger.setLevel(getattr(logging, level.upper()))
+        resolved_log_name = log_name if log_name is not None else f"LOG_DAILY_{today}"
 
-    if logger.hasHandlers():
-        logger.handlers = []
+        logger = logging.getLogger(resolved_log_name)
+        logger.setLevel(getattr(logging, level.upper()))
 
-    file_handler = logging.FileHandler(
-        os.path.join(resolved_folder, f"{resolved_log_name}.log"),
-        mode="a",
-    )
+        if logger.hasHandlers():
+            logger.handlers = []
 
-    caller_file, caller_line = _resolve_caller(
-        ("cabinet.cabinet", "cabinet.log"),
-    )
-    hostname = socket.gethostname()
+        log_file_path = os.path.join(resolved_folder, f"{resolved_log_name}.log")
+        file_handler = logging.FileHandler(log_file_path, mode="a")
 
-    tags_str = ""
-    if tags:
-        tags_str = f" [{','.join(tags)}]"
-
-    file_handler.setFormatter(
-        logging.Formatter(
-            f"%(asctime)s — %(levelname)s{tags_str} -> {caller_file}:{caller_line}"
-            f"@{hostname} -> %(message)s"
+        caller_file, caller_line = _resolve_caller(
+            ("cabinet.cabinet", "cabinet.log"),
         )
-    )
-    logger.addHandler(file_handler)
+        hostname = socket.gethostname()
 
-    if not is_quiet:
-        console_handler = ColorConsoleHandler()
-        console_handler.setFormatter(logging.Formatter("%(message)s"))
-        logger.addHandler(console_handler)
+        tags_str = ""
+        if tags:
+            tags_str = f" [{','.join(tags)}]"
 
-    getattr(logger, level.lower())(message)
+        file_handler.setFormatter(
+            logging.Formatter(
+                f"%(asctime)s — %(levelname)s{tags_str} -> {caller_file}:{caller_line}"
+                f"@{hostname} -> %(message)s"
+            )
+        )
+        logger.addHandler(file_handler)
+
+        if not is_quiet:
+            console_handler = ColorConsoleHandler()
+            console_handler.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(console_handler)
+
+        getattr(logger, level.lower())(message)
+
+        if _loki_jsonl_enabled(cabinet):
+            try:
+                ts_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                tag_list = list(tags) if tags else []
+                payload: dict[str, Any] = {
+                    "timestamp": ts_iso,
+                    "level": normalize_level(level),
+                    "message": message,
+                    "tags": tag_list,
+                    "source": {"file": caller_file, "line": caller_line},
+                    "hostname": hostname,
+                }
+                jsonl_path = os.path.join(resolved_folder, f"{resolved_log_name}.jsonl")
+                _append_jsonl_line(jsonl_path, payload)
+            except Exception:
+                pass
+    except Exception as exc:
+        print(f"Cabinet logging failed (ignored): {exc}", file=sys.stderr)
 
 
 def cabinet_log(
@@ -236,7 +209,6 @@ def cabinet_log(
     log_folder_path: str | None = None,
     is_quiet: bool | None = None,
     tags: list[str] | None = None,
-    collection_name: str | None = None,
 ) -> None:
     if not message:
         raise ValueError("Message cannot be empty")
@@ -247,54 +219,15 @@ def cabinet_log(
     if is_quiet is None:
         is_quiet = level == "debug"
 
-    use_mongo = (
-        log_folder_path is None
-        and helpers.parse_config_bool(getattr(cabinet, "mongodb_enabled", False))
-        and getattr(cabinet, "database", None) is not None
+    write_log_file(
+        cabinet,
+        message,
+        level,
+        log_name=log_name,
+        log_folder_path=log_folder_path,
+        is_quiet=is_quiet,
+        tags=tags,
     )
-
-    if use_mongo:
-        coll = collection_name or DEFAULT_MONGO_LOG_COLLECTION
-        write_log_file(
-            cabinet,
-            message,
-            level,
-            log_name=log_name,
-            log_folder_path=None,
-            is_quiet=is_quiet,
-            tags=tags,
-        )
-        try:
-            write_log_mongo(
-                cabinet,
-                message,
-                level,
-                is_quiet=True,
-                tags=tags,
-                collection_name=coll,
-            )
-        except Exception as error:
-            warn_body = f"log written to file but MongoDB failed: {error}"
-            write_log_file(
-                cabinet,
-                warn_body,
-                "warning",
-                log_name=log_name,
-                log_folder_path=None,
-                is_quiet=True,
-                tags=None,
-            )
-            print(f"Warning: {warn_body}", file=sys.stderr)
-    else:
-        write_log_file(
-            cabinet,
-            message,
-            level,
-            log_name=log_name,
-            log_folder_path=log_folder_path,
-            is_quiet=is_quiet,
-            tags=tags,
-        )
 
 
 def _utc_datetime_for_display(ts: Any) -> datetime:
@@ -308,9 +241,8 @@ def _utc_datetime_for_display(ts: Any) -> datetime:
 
 def format_log_timestamp_local(ts: Any) -> str:
     """
-    Format a log ``timestamp`` (typically UTC in MongoDB) using the **system local**
-    timezone for display. Naive datetimes are treated as UTC. Non-datetimes fall back to
-    ``str(ts)``.
+    Format a timezone-aware or UTC ``datetime`` using the **system local** timezone for
+    display. Naive datetimes are treated as UTC. Non-datetimes fall back to ``str(ts)``.
     """
     if not isinstance(ts, datetime):
         return str(ts)
@@ -319,121 +251,6 @@ def format_log_timestamp_local(ts: Any) -> str:
     except (TypeError, ValueError, OSError):
         return str(ts)
     return local.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-
-
-def format_mongo_log_line(doc: dict[str, Any]) -> str:
-    ts = doc.get("timestamp")
-    if isinstance(ts, datetime):
-        ts_str = format_log_timestamp_local(ts)
-    else:
-        ts_str = str(ts)
-    lev = doc.get("level", "INFO")
-    tags = doc.get("tags") or []
-    if isinstance(tags, str):
-        tags_part = f" [{tags}]" if tags else ""
-    else:
-        tags_part = (
-            f" [{','.join(str(t) for t in tags)}]" if tags else ""
-        )
-    src = doc.get("source") or {}
-    path = src.get("file", "unknown")
-    line = src.get("line", 0)
-    host = doc.get("hostname", "")
-    msg = doc.get("message", "")
-    return f"{ts_str} — {lev}{tags_part} -> {path}:{line}@{host} -> {msg}"
-
-
-def _mongo_timestamp_bounds(
-    date_filter: str | None,
-    since: timedelta | datetime | None,
-) -> dict[str, Any] | None:
-    """Build MongoDB ``timestamp`` range: optional calendar day + optional ``since`` cutoff."""
-    if date_filter is None and since is None:
-        return None
-    bounds: dict[str, Any] = {}
-    if date_filter:
-        day_start = datetime.strptime(date_filter, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        day_end = day_start + timedelta(days=1)
-        bounds["$gte"] = day_start
-        bounds["$lt"] = day_end
-    if since is not None:
-        cutoff = _since_to_utc_cutoff(since)
-        if "$gte" in bounds:
-            bounds["$gte"] = max(bounds["$gte"], cutoff)
-        else:
-            bounds["$gte"] = cutoff
-    return bounds
-
-
-def log_query_documents(
-    cabinet: Cabinet,
-    *,
-    level: str | None = None,
-    since: timedelta | datetime | None = None,
-    collection_name: str | None = None,
-    limit: int = 500,
-) -> list[dict[str, Any]]:
-    """
-    Return recent log documents from MongoDB, optionally filtered by level and time.
-
-    Args:
-        cabinet: Configured Cabinet instance.
-        level: Log level (e.g. error, INFO); matching is case-insensitive.
-        since: Only entries at or after this UTC time, or within this timedelta of now.
-        collection_name: MongoDB collection (defaults to the ``log`` collection).
-        limit: Maximum documents to return, newest first.
-
-    Raises:
-        ValueError: If MongoDB is not enabled.
-    """
-    if not helpers.parse_config_bool(getattr(cabinet, "mongodb_enabled", False)):
-        raise ValueError("MongoDB must be enabled to query logs from the database")
-
-    coll = collection_name or DEFAULT_MONGO_LOG_COLLECTION
-    query: dict[str, Any] = {}
-    if level is not None:
-        query["level"] = normalize_level(level).upper()
-    ts_bounds = _mongo_timestamp_bounds(None, since)
-    if ts_bounds:
-        query["timestamp"] = ts_bounds
-
-    def _find():
-        cur = (
-            cabinet.database[coll]
-            .find(query)
-            .sort("timestamp", -1)
-            .limit(limit)
-        )
-        return list(cur)
-
-    return cabinet._mongodb_with_timeout(_find)  # pylint: disable=protected-access
-
-
-def _build_mongo_log_query_filter(
-    *,
-    tags: list[str] | None,
-    path: str | None,
-    hostname: str | None,
-    level: str | None,
-    date_filter: str | None,
-    message: str | None,
-    since: timedelta | datetime | None = None,
-) -> dict[str, Any]:
-    q: dict[str, Any] = {}
-    if level:
-        q["level"] = normalize_level(level).upper()
-    if hostname:
-        q["hostname"] = hostname
-    if tags:
-        q["tags"] = {"$in": list(tags)}
-    if path:
-        q["source.file"] = {"$regex": re.escape(path), "$options": "i"}
-    if message:
-        q["message"] = {"$regex": re.escape(message), "$options": "i"}
-    ts_bounds = _mongo_timestamp_bounds(date_filter, since)
-    if ts_bounds:
-        q["timestamp"] = ts_bounds
-    return q
 
 
 def cabinet_log_query(
@@ -445,30 +262,8 @@ def cabinet_log_query(
     level: str | None = None,
     date_filter: str | None = None,
     message: str | None = None,
-    collection_name: str | None = None,
     since: timedelta | datetime | None = None,
 ) -> list[str]:
-    if helpers.parse_config_bool(getattr(cabinet, "mongodb_enabled", False)):
-        coll = collection_name or DEFAULT_MONGO_LOG_COLLECTION
-        mongo_filter = _build_mongo_log_query_filter(
-            tags=tags,
-            path=path,
-            hostname=hostname,
-            level=level,
-            date_filter=date_filter,
-            message=message,
-            since=since,
-        )
-
-        def _run():
-            cur = cabinet.database[coll].find(mongo_filter).sort("timestamp", -1).limit(
-                5000
-            )
-            return [format_mongo_log_line(d) for d in cur]
-
-        return cabinet._mongodb_with_timeout(_run)  # pylint: disable=protected-access
-
-    # ——— file-based query (original behavior) ———
     if log_file is None:
         today = str(date.today())
         log_file = f"LOG_DAILY_{today}.log"
@@ -559,8 +354,7 @@ def _parse_local_display_log_ts(ts_str: str) -> datetime | None:
     """
     Parse the leading timestamp from a cabinet log line as **naive local** time.
 
-    File logs use ``logging``'s default ``asctime`` (often without milliseconds); Mongo-backed
-    lines from :func:`format_mongo_log_line` use fractional seconds in local time.
+    File lines use ``logging``'s default ``asctime`` (often without fractional seconds).
     """
     ts_str = ts_str.strip()
     try:
@@ -622,51 +416,384 @@ def _collect_log_issue_lines_from_files(
     return out
 
 
-def _mongodb_log_query_usable(cabinet: Cabinet) -> bool:
-    return helpers.parse_config_bool(
-        getattr(cabinet, "mongodb_enabled", False)
-    ) and getattr(cabinet, "database", None) is not None
-
-
 def cabinet_log_query_issues(
     cabinet: Cabinet,
     *,
     since: timedelta | datetime | None = None,
-    collection_name: str | None = None,
 ) -> list[str]:
     """
     Return formatted log lines at **WARNING**, **ERROR**, or **CRITICAL** within ``since``.
 
-    Default ``since`` is the last 24 hours. When MongoDB is enabled, queries the log collection
-    (see :func:`cabinet_log_query`). If the query raises or MongoDB is not configured, falls back
-    to scanning today's and yesterday's daily files under ``path_dir_log``.
+    Default ``since`` is the last 24 hours. Reads today’s and yesterday’s daily **files**
+    under ``path_dir_log``.
 
-    Lines are deduplicated, sorted chronologically (by parsed local timestamp), and ready for
-    display (same format as :func:`cabinet_log_query`).
+    Lines are deduplicated, sorted chronologically (by parsed local timestamp), and in the
+    same textual format as :func:`cabinet_log_query`.
     """
     if since is None:
         since = timedelta(hours=24)
-
-    if _mongodb_log_query_usable(cabinet):
-        try:
-            merged: list[str] = []
-            for lev in _LOG_QUERY_ISSUE_LEVELS:
-                merged.extend(
-                    cabinet_log_query(
-                        cabinet,
-                        level=lev,
-                        since=since,
-                        collection_name=collection_name,
-                    )
-                )
-        except Exception:
-            pass
-        else:
-            merged = list(dict.fromkeys(merged))
-            merged.sort(key=_log_issue_line_sort_key)
-            return merged
 
     merged = _collect_log_issue_lines_from_files(cabinet, since)
     merged = list(dict.fromkeys(merged))
     merged.sort(key=_log_issue_line_sort_key)
     return merged
+
+
+# --- Loki query (HTTP read path; optional ``logging.loki_url`` in config) -----------
+
+
+def _require_loki_url(cabinet: Cabinet) -> str:
+    try:
+        url = object.__getattribute__(cabinet, "logging_loki_url")
+    except AttributeError as exc:
+        raise ValueError(
+            "Loki URL not configured. Set logging.loki_url in config.json "
+            "(e.g. http://127.0.0.1:3100)."
+        ) from exc
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError(
+            "Loki URL not configured. Set logging.loki_url in config.json "
+            "(e.g. http://127.0.0.1:3100)."
+        )
+    return url.strip().rstrip("/")
+
+
+def _loki_job_name(cabinet: Cabinet) -> str:
+    try:
+        job = object.__getattribute__(cabinet, "logging_loki_job")
+    except AttributeError:
+        return "cabinet"
+    if isinstance(job, str) and job.strip():
+        return job.strip()
+    return "cabinet"
+
+
+def _loki_query_timeout_s(cabinet: Cabinet) -> float:
+    try:
+        t = object.__getattribute__(cabinet, "logging_loki_query_timeout")
+    except AttributeError:
+        return 30.0
+    if isinstance(t, (int, float)) and t > 0:
+        return float(t)
+    return 30.0
+
+
+def _parse_iso_to_utc(ts: str | None) -> datetime | None:
+    if not ts or not isinstance(ts, str):
+        return None
+    s = ts.strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def loki_query_range(
+    cabinet: Cabinet,
+    logql: str,
+    *,
+    limit: int = 500,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[tuple[dict[str, str], str, str]]:
+    """
+    Run ``query_range`` against Loki. Returns ``(stream labels, ts_ns, log line)`` tuples
+    newest-first within each stream (caller should merge/sort if needed).
+
+    Raises:
+        ValueError: If ``logging.loki_url`` is not set.
+        urllib.error.URLError: On network/HTTP failures.
+        RuntimeError: If Loki returns a non-success status.
+    """
+    base = _require_loki_url(cabinet)
+    if end is None:
+        end = datetime.now(timezone.utc)
+    if start is None:
+        start = end - timedelta(hours=24)
+    ns_start = str(int(start.timestamp() * 1_000_000_000))
+    ns_end = str(int(end.timestamp() * 1_000_000_000))
+    params = urllib.parse.urlencode(
+        {"query": logql, "limit": str(max(1, limit)), "start": ns_start, "end": ns_end}
+    )
+    url = f"{base}/loki/api/v1/query_range?{params}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    timeout = _loki_query_timeout_s(cabinet)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Loki HTTP {exc.code}: {detail}") from exc
+
+    if body.get("status") != "success":
+        raise RuntimeError(body.get("error") or body.get("message") or str(body))
+
+    out: list[tuple[dict[str, str], str, str]] = []
+    for stream in body.get("data", {}).get("result", []) or []:
+        stream_labels = stream.get("stream") or {}
+        for ts_ns, line in stream.get("values") or []:
+            out.append((stream_labels, ts_ns, line))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
+
+
+def _record_from_loki_json_line(
+    labels: dict[str, str],
+    ts_ns: str,
+    line: str,
+) -> dict[str, Any]:
+    try:
+        rec: dict[str, Any] = json.loads(line)
+    except json.JSONDecodeError:
+        rec = {
+            "message": line,
+            "level": labels.get("level", "info"),
+            "tags": [],
+            "source": {},
+            "hostname": labels.get("hostname", ""),
+            "timestamp": labels.get("timestamp", ""),
+        }
+    ts_raw = rec.get("timestamp")
+    dt = None
+    if isinstance(ts_raw, str):
+        dt = _parse_iso_to_utc(ts_raw)
+    elif isinstance(ts_raw, datetime):
+        dt = ts_raw.astimezone(timezone.utc)
+    if dt is not None:
+        rec["timestamp"] = dt
+    elif ts_ns.isdigit():
+        sec = int(ts_ns) / 1_000_000_000
+        rec["timestamp"] = datetime.fromtimestamp(sec, tz=timezone.utc)
+    rec["_loki"] = {"labels": dict(labels), "ts_ns": ts_ns}
+    return rec
+
+
+def format_json_log_record_as_cabinet_line(rec: dict[str, Any]) -> str:
+    """Format a Cabinet JSONL record like the classic human-readable ``.log`` line."""
+    ts_val = rec.get("timestamp")
+    if isinstance(ts_val, datetime):
+        ts_str = format_log_timestamp_local(ts_val)
+    elif isinstance(ts_val, str):
+        dt = _parse_iso_to_utc(ts_val)
+        ts_str = format_log_timestamp_local(dt) if dt else ts_val
+    else:
+        ts_str = str(ts_val)
+    lev = str(rec.get("level", "info")).upper()
+    if lev == "WARN":
+        lev = "WARNING"
+    tags = rec.get("tags") or []
+    if isinstance(tags, str):
+        tags_part = f" [{tags}]" if tags else ""
+    else:
+        tag_list = [str(t) for t in tags]
+        tags_part = f" [{','.join(tag_list)}]" if tag_list else ""
+    src = rec.get("source") or {}
+    path = src.get("file", "unknown")
+    line_no = src.get("line", 0)
+    host = rec.get("hostname", "")
+    msg = rec.get("message", "")
+    return f"{ts_str} — {lev}{tags_part} -> {path}:{line_no}@{host} -> {msg}"
+
+
+def _build_loki_selector(cabinet: Cabinet, hostname: str | None, level: str | None) -> str:
+    job = _loki_job_name(cabinet)
+    parts = [f'job="{job}"']
+    if hostname:
+        parts.append(f'hostname="{hostname}"')
+    if level:
+        parts.append(f'level="{normalize_level(level)}"')
+    return "{" + ",".join(parts) + "}"
+
+
+def _loki_record_matches(
+    rec: dict[str, Any],
+    labels: dict[str, str],
+    *,
+    tags: list[str] | None,
+    path: str | None,
+    message: str | None,
+    date_filter: str | None,
+    log_file: str | None,
+    since: timedelta | datetime | None,
+) -> bool:
+    ts_dt = rec.get("timestamp")
+    if not isinstance(ts_dt, datetime):
+        return False
+    ts_utc = ts_dt.astimezone(timezone.utc)
+
+    if since is not None:
+        cutoff = _since_to_utc_cutoff(since)
+        if ts_utc < cutoff:
+            return False
+
+    if date_filter:
+        local_head = format_log_timestamp_local(ts_dt)[:10]
+        if local_head != date_filter:
+            return False
+
+    if message and message.lower() not in str(rec.get("message", "")).lower():
+        return False
+
+    if path:
+        src = rec.get("source") or {}
+        fpath = str(src.get("file", "")).lower()
+        if path.lower() not in fpath:
+            return False
+
+    if tags:
+        raw_tags = rec.get("tags")
+        if isinstance(raw_tags, str):
+            have = {raw_tags.strip().lower()} if raw_tags.strip() else set()
+        elif isinstance(raw_tags, list):
+            have = {str(t).strip().lower() for t in raw_tags}
+        else:
+            have = set()
+        for tag in tags:
+            if tag.strip().lower() not in have:
+                return False
+
+    if log_file:
+        fn = labels.get("filename", "")
+        if log_file not in fn and log_file not in json.dumps(rec):
+            return False
+
+    return True
+
+
+def cabinet_log_query_documents_loki(
+    cabinet: Cabinet,
+    *,
+    level: str | None = None,
+    since: timedelta | datetime | None = None,
+    end: datetime | None = None,
+    tags: list[str] | None = None,
+    path: str | None = None,
+    hostname: str | None = None,
+    message: str | None = None,
+    date_filter: str | None = None,
+    log_file: str | None = None,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    """
+    Return log entries from **Loki** (Cabinet **JSONL** streams) as dicts, newest first.
+
+    Requires ``config.json`` → ``logging.loki_url`` (e.g. ``http://127.0.0.1:3100``).
+    Each dict matches the JSONL shape (``timestamp`` as timezone-aware ``datetime``) plus
+    ``_loki`` metadata. Uses HTTP; does not write logs.
+    """
+    if limit < 1:
+        limit = 1
+    window_end = end if end is not None else datetime.now(timezone.utc)
+    window_start: datetime | None = None
+    if since is not None and isinstance(since, datetime):
+        window_start = since.astimezone(timezone.utc)
+    elif since is not None:
+        window_start = window_end - since
+    else:
+        window_start = window_end - timedelta(hours=24)
+
+    logql = _build_loki_selector(cabinet, hostname, level)
+    fetch_limit = min(5000, max(limit * 20, limit))
+    triples = loki_query_range(
+        cabinet,
+        logql,
+        limit=fetch_limit,
+        start=window_start,
+        end=window_end,
+    )
+
+    out: list[dict[str, Any]] = []
+    for labels, ts_ns, line in triples:
+        rec = _record_from_loki_json_line(labels, ts_ns, line)
+        if _loki_record_matches(
+            rec,
+            labels,
+            tags=tags,
+            path=path,
+            message=message,
+            date_filter=date_filter,
+            log_file=log_file,
+            since=None,
+        ):
+            out.append(rec)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def cabinet_log_query_loki(
+    cabinet: Cabinet,
+    log_file: str | None = None,
+    tags: list[str] | None = None,
+    path: str | None = None,
+    hostname: str | None = None,
+    level: str | None = None,
+    date_filter: str | None = None,
+    message: str | None = None,
+    since: timedelta | datetime | None = None,
+    end: datetime | None = None,
+    limit: int = 500,
+) -> list[str]:
+    """
+    Same filter semantics as :func:`cabinet_log_query`, but data is read from **Loki**
+    (Cabinet JSONL). Returns human-readable lines matching the classic ``.log`` format.
+    """
+    docs = cabinet_log_query_documents_loki(
+        cabinet,
+        level=level,
+        since=since,
+        end=end,
+        tags=tags,
+        path=path,
+        hostname=hostname,
+        message=message,
+        date_filter=date_filter,
+        log_file=log_file,
+        limit=limit,
+    )
+    return [format_json_log_record_as_cabinet_line(d) for d in docs]
+
+
+def cabinet_log_query_issues_loki(
+    cabinet: Cabinet,
+    *,
+    since: timedelta | datetime | None = None,
+    end: datetime | None = None,
+    limit: int = 500,
+) -> list[str]:
+    """
+    Return **WARNING**, **ERROR**, and **CRITICAL** lines from **Loki**, same time window
+    semantics as :func:`cabinet_log_query_issues` (default: last 24 hours).
+    """
+    if since is None:
+        since = timedelta(hours=24)
+
+    job = _loki_job_name(cabinet)
+    logql = f'{{job="{job}"}}'
+    window_end = end if end is not None else datetime.now(timezone.utc)
+    if isinstance(since, datetime):
+        window_start = since.astimezone(timezone.utc)
+    else:
+        window_start = window_end - since
+
+    triples = loki_query_range(
+        cabinet,
+        logql,
+        limit=min(5000, max(limit * 10, limit)),
+        start=window_start,
+        end=window_end,
+    )
+    lines: list[str] = []
+    for labels, ts_ns, line in triples:
+        rec = _record_from_loki_json_line(labels, ts_ns, line)
+        lev = normalize_level(str(rec.get("level", labels.get("level", "info"))))
+        if lev not in ("warning", "error", "critical"):
+            continue
+        lines.append(format_json_log_record_as_cabinet_line(rec))
+    lines = list(dict.fromkeys(lines))
+    lines.sort(key=_log_issue_line_sort_key)
+    return lines[:limit]
