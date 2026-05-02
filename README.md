@@ -1,22 +1,21 @@
 # Cabinet
+
 Cabinet is a lightweight, flexible data organization tool that lets you manage your data with the simplicity of a JSON file or the power of MongoDB - your choice.
 
 ## Breaking changes in 3.0.0
 
-This release changes how logging works when MongoDB is enabled. Plan upgrades accordingly.
+This release changes how logging works. Plan upgrades accordingly.
 
 - **`logdb()` removed.** Use `cab.log(...)` instead. There is no separate database-only logging API.
 - **`--logdb` / `-ldb` removed.** Use `cabinet -l` / `--log` with `--level` as needed; the CLI follows the same rules as the Python API.
-- **Default log collection is `log`.** When `mongodb_enabled` is true, `cab.log()` writes to the **`log`** collection in your configured `mongodb_db_name` (not a separate database and not the old default collection name `logs`). Override with `collection_name=` on `cab.log(...)` if you need a different collection.
-- **`cab.log_query()` and `cabinet --query`:** When MongoDB is enabled, queries run against the same log collection (default `log`) and return lines in the same textual format as file-based logs. When MongoDB is disabled, behavior remains file-based under `path_dir_log`. Optional **`since`** uses the same semantics as **`cab.log_query_documents()`** (UTC cutoff or `timedelta` from now).
-- **`cab.log_query_issues()`:** Returns **WARNING**, **ERROR**, and **CRITICAL** lines for the last 24 hours by default (MongoDB when enabled, otherwise today’s and yesterday’s files under `path_dir_log`; silently falls back to files if Mongo queries fail).
-- **Structured log reads:** `cab.log_query_documents(level=..., since=..., limit=...)` returns recent log **documents** from MongoDB; `since` can be a `datetime` cutoff or a `timedelta` meaning “how far back from now.”
-- **Naming:** Line-oriented search is **`cab.log_query(...)`**; raw documents use **`cab.log_query_documents(...)`**; **`cab.log_query_issues(...)`** is a convenience for “warning and above” in a time window.
+- **File-first logging:** `cab.log()` / `cabinet --log` **always** write to **local-only** daily files under `path_dir_log` on each machine. Logging does **not** use MongoDB. Optional **`logging.loki_enabled`** appends one structured JSON line per event to a sibling **`*.jsonl`** file so **Promtail on that same machine** can ship to a **central Loki** (see [Logging and Loki (optional)](#logging-and-loki-optional)).
+- **`cab.log_query()` and `cabinet --query`:** Search **log files** under `path_dir_log` only. MongoDB is for Cabinet’s **configuration/data** collection, not logs. Optional **`since`** filters by UTC cutoff or `timedelta` (compared using each line’s local timestamp).
+- **`cab.log_query_issues()`:** Returns **WARNING**, **ERROR**, and **CRITICAL** lines for the last 24 hours by default by scanning today’s and yesterday’s daily files under `path_dir_log`.
+- **`cab.log_query_documents()` removed:** Use **Loki/Grafana** for centralized structured log views, or read **`.jsonl`** / **`.log`** files directly.
 
 Earlier releases:
 
 - [Breaking change in 2.0.0](#breaking-change-in-200)
-
 - [Cabinet](#cabinet)
   - [Breaking changes in 3.0.0](#breaking-changes-in-300)
   - [✨ Features](#-features)
@@ -27,6 +26,7 @@ Earlier releases:
   - [Structure](#structure)
   - [CLI usage](#cli-usage)
   - [Configuration](#configuration)
+    - [Logging and Loki (optional)](#logging-and-loki-optional)
     - [edit\_file() shortcuts](#edit_file-shortcuts)
     - [mail](#mail)
   - [Examples](#examples)
@@ -40,21 +40,21 @@ Earlier releases:
     - [`log`](#log)
     - [`log_query`](#log_query)
     - [`log_query_issues`](#log_query_issues)
-    - [`log_query_documents`](#log_query_documents)
+    - [Loki queries](#log_query_loki-log_query_documents_loki-log_query_issues_loki)
   - [UI Module](#ui-module)
   - [Disclaimers](#disclaimers)
   - [Author](#author)
 
-
 ## ✨ Features
 
 - Access your data across multiple projects
-- Log messages to the MongoDB **`log`** collection when `mongodb_enabled` is true, or to daily files under `path_dir_log` when it is not (or when you pass `log_folder_path` to force file logging)
-- Edit MongoDB as though it were a JSON file
+- Log messages to **local** files under `path_dir_log` (and optional **local `*.jsonl`** for that host’s Promtail). **`cab.log_query()`** / **`cab.log_query_issues()`** read **files**; **`cab.log_query*_loki()`** reads **Loki** when **`logging.loki_url`** is set. MongoDB is only for **Cabinet data**, not logs.
+- Edit MongoDB as though it were a JSON file (Cabinet **data** only, not logs)
 - Send mail from the terminal
 - Library for interactive command-line interface components using `prompt_toolkit`
 
 ### Breaking change in 2.0.0
+
 - `mongodb_connection_string` replaces `mongodb_username` and `mongodb_password`.
 
 ## Installation and Setup
@@ -62,8 +62,8 @@ Earlier releases:
 ### CLI and Python Library (Recommended)
 
 - Install [pipx](https://pypa.github.io/pipx/) if you don't have it already
-
 - Install `cabinet`:
+
 ```bash
 pipx install cabinet
 cabinet --configure
@@ -72,6 +72,7 @@ cabinet --configure
 Requires **Python 3.10+** (see `python_requires` in `setup.cfg`).
 
 ### CLI Only
+
 ```bash
 curl -s https://api.github.com/repos/tylerjwoodfin/cabinet/releases/latest \
 | grep "browser_download_url" \
@@ -101,8 +102,7 @@ pytest
   - data from MongoDB is interacted with as if it were a JSON file
   - cache is written when retrieving data.
   - if cache is older than 1 hour, it is refreshed; otherwise, data is pulled from cache by default
-- **Logs (file mode):** With MongoDB disabled, logs are written under `~/.cabinet/log/<YYYY-MM-DD>/LOG_DAILY_<date>.log` by default. Set `path_dir_log` in `~/.config/cabinet/config.json` to use another directory.
-- **Logs (MongoDB mode):** With `mongodb_enabled` true, `cab.log()` writes a daily file under **`path_dir_log`** first, then best-effort to the **`log`** collection; MongoDB errors add a **WARNING** line to that same file plus a **stderr** warning, and do not block the primary file write. Use `log_folder_path` for **file-only** output, or `collection_name` to pick another collection. Stored Mongo timestamps are **UTC**; `cab.log_query()` formats line output in **local** time (`cabinet.log.format_log_timestamp_local`).
+- **Logs:** **`cab.log()`** / **`cabinet --log`** append to **`path_dir_log/<YYYY-MM-DD>/`** on **that machine only**. Optional **JSONL** for **`logging.loki_enabled`** (scraped by **Promtail on the same host**). **`cab.log_query()`** / **`cab.log_query_issues()`** scan local **`.log`** files. **`cab.log_query_loki()`** / **`cab.log_query_documents_loki()`** / **`cab.log_query_issues_loki()`** query **Loki** via **`logging.loki_url`**. MongoDB stores Cabinet **variables** only, not logs.
 
 ## CLI usage
 
@@ -137,7 +137,7 @@ Options:
   --get-file GET_FILE   Get file
   --export              Export MongoDB to ~/.cabinet/export
   --strip               (for --get-file) Surrounding whitespace is stripped by default; pass this flag to read file content without stripping
-  --log, -l LOG         Log a message (file + best-effort MongoDB `log` collection when enabled, else file only)
+  --log, -l LOG         Log a message (local files; optional JSONL when logging.loki_enabled)
   --level LOG_LEVEL     (for -l) Log level [debug, info, warn, error, critical]
   --tags LOG_TAGS       (for -l) Comma-separated tags for the log entry
   --editor EDITOR       (for --edit and --edit-file) Specify an editor
@@ -158,40 +158,80 @@ Mail:
   --to, -t TO_ADDR      To address(es)
 ```
 
-When **`mongodb_enabled`** is true, `--query` reads from the **`log`** collection (same semantics as `Cabinet.log_query`; optional `collection_name=` only applies from Python).
+`--query` searches **log files** under `path_dir_log`, the same as Python **`Cabinet.log_query`**.
 
 ## Configuration
 
 - Configuration data is stored in `~/.config/cabinet/config.json`.
-
 - Upon first launch, the tool will walk you through each option.
-  - `path_dir_log` is the directory where logs will be stored by default.
+  - `path_dir_log` is the **local** directory where logs are stored on **this machine** by default (do not use a shared/Syncthing/NFS path for Loki shipping).
   - `mongodb_enabled` is a boolean that determines whether MongoDB is used.
   - `mongodb_db_name` is the name of the database you want to use by default.
   - `mongodb_connection_string` is the connection string for MongoDB.
   - `editor` is the default editor that will be used when editing files.
   - You will be prompted to enter your MongoDB credentials (optional).
   - If you choose not to use MongoDB, data will be stored in `~/.cabinet/data.json`.
-
 - Follow these instructions to find your MongoDB connection string: [MongoDB Atlas](https://docs.atlas.mongodb.com/tutorial/connect-to-your-cluster/) or [MongoDB](https://docs.mongodb.com/manual/reference/connection-string/) (for local MongoDB, untested).
-
 - You will be asked to configure your default editor from the list of available editors on
   your system. If this step is skipped, or an error occurs, `nano` will be used.
-
   You can change this with `cabinet --configure` and modifying the `editor` attribute.
 
 Your `config.json` should look something like this:
+
 ```json
 {
-    "path_dir_log": "/path/to/your/log/directory",
+    "path_dir_log": "/path/to/local/log/directory",
     "mongodb_db_name": "cabinet (or other name of your choice)",
     "editor": "nvim",
     "mongodb_enabled": true,
-    "mongodb_connection_string": "<your connection string>"
+    "mongodb_connection_string": "<your connection string>",
+    "logging": {
+        "loki_enabled": true,
+        "log_dir": "~/.cabinet/log",
+        "loki_url": "http://loki.example.com:3100"
+    }
 }
 ```
 
+The **`logging`** object is optional. `loki_enabled` turns on parallel **JSON Lines** files (`*.jsonl`) next to each `*.log` on **that machine’s local disk** for local Promtail to scrape. **`loki_url`** enables **`cab.log_query*_loki(...)`** helpers against a Loki server (central or tunneled). **`log_dir`**, when set, overrides the on-disk log directory for `cab.log()` (if omitted, top-level **`path_dir_log`** is used).
+
+### Logging and Loki (optional)
+
+**Architecture (multi-machine):**
+
+```text
+log() → local *.log + *.jsonl (this host only) → Promtail (this host) → Loki (one central server) → Grafana
+```
+
+- **File-first:** Every `cab.log()` / `cabinet -l` line goes to the classic **`.log`** format on **local disk**.
+- **Do not share log directories:** Use a **local** path per machine for `path_dir_log` / `logging.log_dir` (e.g. `~/.cabinet/log`). **Do not** use Syncthing, NFS, or other shared folders for Cabinet logs: multiple writers to the same files cause sync conflicts, torn lines, duplicate or missing ingestion, and undefined ordering. That pattern is unsupported.
+- **No log push HTTP:** `cab.log()` never POSTs to Loki; **Promtail on each machine** tails local `*.jsonl` and pushes to Loki. **Reads** from Loki (`cab.log_query*_loki`) use HTTP only when **`logging.loki_url`** is set.
+- **Optional JSONL:** With `logging.loki_enabled`, each event also appends one JSON object per line to **`LOG_DAILY_<date>.jsonl`** in the same date folder (fields include `timestamp`, `level`, `message`, `tags`, `source`, `hostname` from `socket.gethostname()` on that host).
+- **Central Loki + Grafana:** On **one** server, from `~/git/docker/loki`:
+  ```bash
+  cd ~/git/docker/loki
+  cp .env.example .env   # optional: GRAFANA_PORT
+  docker compose up -d
+  ```
+  This starts **Loki** (e.g. port **3100**) and **Grafana** (host port from `.env`, default **57138**; login **admin** / **admin**). It does **not** run Promtail.
+- **Promtail on every host that logs:** Each machine that runs Cabinet with `loki_enabled` must run its **own** Promtail, reading **only** its local log directory and pushing to the central `LOKI_URL`. Example repo layout: `docker-compose.promtail.yml`, `promtail-config.yml`, and `promtail.env` — see **`~/git/docker/loki/README.md`** and **`promtail.env.example`**.
+- **Multi-machine example:** Host **cloud** runs Cabinet → local JSONL → Promtail → Loki; host **rainbow** same; host **ice** same. In Grafana Explore, filter by source host with LogQL labels such as `{job="cabinet", hostname="rainbow"}` (hostname comes from the JSON line).
+- **Turn off Loki shipping:** Set `loki_enabled` to `false`, or stop Promtail on that host. Cabinet does not require Docker.
+- **Explore logs in Grafana:** **Explore** → datasource **Loki** → e.g. `{job="cabinet"}` or `{job="cabinet", hostname="cloud"}`.
+- **Query from Python (Loki):** Set **`logging.loki_url`** to your **reachable** Loki base URL (e.g. `http://central:3100` or via VPN). Use **`cab.log_query_loki(...)`**, **`cab.log_query_documents_loki(...)`**, **`cab.log_query_issues_loki(...)`**. Optional **`logging.loki_job`** (default `cabinet`, must match Promtail’s `job` label) and **`logging.loki_query_timeout`** (seconds, default `30`).
+- **Config example (logging + Loki reads):**
+  ```json
+  "logging": {
+      "loki_enabled": true,
+      "log_dir": "~/.cabinet/log",
+      "loki_url": "http://loki.example.com:3100",
+      "loki_job": "cabinet",
+      "loki_query_timeout": 30
+  }
+  ```
+
 ### edit_file() shortcuts
+
 - see example below to enable something like
   - `cabinet -ef shopping` from the terminal
     - rather than `cabinet -ef "~/path/to/shopping_list.md"`
@@ -216,6 +256,7 @@ Shortcut mapping example:
 ```
 
 set from terminal:
+
 ```bash
 cabinet -p edit shopping value "~/path/to/whatever.md"
 cabinet -p edit todo value "~/path/to/whatever.md"
@@ -228,6 +269,7 @@ cabinet -p edit todo value "~/path/to/whatever.md"
 - In Cabinet (`cabinet -e`), add the `email` object to make your settings file look like this example:
 
 file:
+
 ```json
 {
     "email": {
@@ -243,6 +285,7 @@ file:
 ```
 
 set from terminal:
+
 ```bash
 cabinet -p email from throwaway@example.com
 cabinet -p email from_pw example
@@ -254,6 +297,7 @@ cabinet -p email from_pw example
 ### `put`
 
 python:
+
 ```python
 from cabinet import Cabinet
 
@@ -263,11 +307,13 @@ cab.put("employee", "Tyler", "salary", 7.25)
 ```
 
 or terminal:
+
 ```bash
 cabinet -p employee Tyler salary 7.25
 ```
 
 results in this structure in MongoDB:
+
 ```json
 {
     "employee": {
@@ -281,6 +327,7 @@ results in this structure in MongoDB:
 ### `get`
 
 python:
+
 ```python
 from cabinet import Cabinet
 
@@ -292,12 +339,15 @@ print(cab.get("employee", "Tyler", "salary"))
 ```
 
 or terminal:
+
 ```bash
 cabinet -g employee Tyler salary
 ```
+
 - optional: `--force-cache-update` to force a cache update
 
 results in:
+
 ```bash
 7.25
 ```
@@ -305,6 +355,7 @@ results in:
 ### `remove`
 
 python:
+
 ```python
 from cabinet import Cabinet
 
@@ -314,11 +365,13 @@ cab.remove("employee", "Tyler", "salary")
 ```
 
 or terminal:
+
 ```bash
 cabinet -rm employee Tyler salary
 ```
 
 results in this structure in MongoDB:
+
 ```json
 {
     "employee": {
@@ -332,6 +385,7 @@ results in this structure in MongoDB:
 Appends a value to an existing string (concatenation) or array. For other types (bool, int, float, etc.), prints a graceful error. Prints the updated value.
 
 python:
+
 ```python
 from cabinet import Cabinet
 
@@ -347,6 +401,7 @@ cab.append("fruits", "banana", is_print=True)
 ```
 
 or terminal:
+
 ```bash
 # Append to array: ['apple'] -> ['apple', 'banana']
 cabinet -p fruits '["apple"]'
@@ -368,6 +423,7 @@ cabinet -a person tyler fruits banana
 ### `edit`
 
 terminal:
+
 ```bash
 
 # opens file in the default editor (`cabinet --configure` -> 'editor'), saves upon exit
@@ -385,6 +441,7 @@ cabinet -e --editor=code
 ### `edit_file`
 
 python:
+
 ```python
 from cabinet import Cabinet
 
@@ -403,6 +460,7 @@ cab.edit("/path/to/shopping.md", editor="nvim")
 ```
 
 terminal:
+
 ```bash
 # assumes path -> edit -> shopping -> path/to/shopping.md has been set
 cabinet -ef shopping
@@ -415,6 +473,7 @@ cabinet -ef "/path/to/shopping.md"
 ### `mail`
 
 python:
+
 ```python
 
 from cabinet import Mail
@@ -425,6 +484,7 @@ mail.send('Test Subject', 'Test Body')
 ```
 
 terminal:
+
 ```bash
 cabinet --mail --subject "Test Subject" --body "Test Body"
 
@@ -435,20 +495,19 @@ cabinet --mail -s "Test Subject" -b "Test Body"
 
 ### `log`
 
-With **`mongodb_enabled` true**, `cab.log()` writes a **daily file** under `path_dir_log` first, then inserts into the MongoDB **`log`** collection (or `collection_name=`). If MongoDB fails, the file entry still succeeds, a **WARNING** line describing the error is appended to that file, and stderr also prints a warning. With MongoDB off, or if you pass **`log_folder_path`**, only file logging runs (no Mongo insert).
+**`cab.log()`** / **`cabinet --log`** write only to **local files** (classic **`.log`** lines). There are **no** network calls. If **`logging.loki_enabled`** is true in `config.json`, each event also appends a structured line to a matching **local `.jsonl`** file for **Promtail on that host** to ship to **central Loki**. Failures to write are printed to **stderr** and do not propagate as exceptions from `log()`.
 
-python:
+**MongoDB** is only for Cabinet’s **`get` / `put`** data. Logs are **files** (and optional **Loki**).
+
 ```python
 from cabinet import Cabinet
 
 cab = Cabinet()
 
-# MongoDB mode (when mongodb_enabled is true): file under path_dir_log, then `log` collection
+# Always: daily file under path_dir_log, e.g. ~/.cabinet/log/<YYYY-MM-DD>/LOG_DAILY_<date>.log
+# If logging.loki_enabled: also ~/.cabinet/log/<YYYY-MM-DD>/LOG_DAILY_<date>.jsonl
 cab.log("Connection timed out")  # defaults to info if no level is set
-cab.log("Debug breakpoint", level="debug", collection_name="debug_trace")  # optional collection override
-
-# File mode (MongoDB disabled, or pass log_folder_path to force files while MongoDB is on)
-# Files live under path_dir_log, e.g. ~/.cabinet/log/<YYYY-MM-DD>/LOG_DAILY_<date>.log
+cab.log("Debug breakpoint", level="debug")
 
 cab.log("This function hit a breakpoint", level="debug")
 cab.log("Looks like the server is on fire", level="critical")
@@ -472,8 +531,9 @@ cab.log("30", log_name="LOG_TEMPERATURE", log_folder_path="~/weather")
 ```
 
 terminal:
+
 ```bash
-# Same routing as Python: file + MongoDB when enabled, else file only
+# Same file routing as Python (optional JSONL if logging.loki_enabled in config)
 cabinet -l "Connection timed out"
 cabinet --log "Connection timed out"
 cabinet --log "Server is on fire" --level "critical"
@@ -485,25 +545,20 @@ cabinet --log "Pruning repository" --level "info" --tags "backup,prune"
 
 ### `log_query`
 
-Query logs by tags, path, hostname, level, date, and message. When **`mongodb_enabled`** is true, this queries the **`log`** collection (or pass `collection_name=`). Otherwise it searches rotating files under **`path_dir_log`**; optional **`log_file`** only applies in file mode. Optional **`since`** (`datetime` or `timedelta`, same as **`log_query_documents`**) restricts to entries on or after that UTC cutoff.
+Query **log files** under **`path_dir_log`** by tags, path, hostname, level, date, and message. Optional **`since`** (`datetime` or `timedelta`) restricts to entries on or after that UTC cutoff (using each line’s parsed local time).
 
-python:
 ```python
 from datetime import timedelta
 from cabinet import Cabinet
 
 cab = Cabinet()
 
-# Optional time window (file or MongoDB)
+# Optional time window
 results = cab.log_query(since=timedelta(days=7), level="ERROR")
 
-# MongoDB mode: filters apply to documents in the `log` collection
 results = cab.log_query(tags=["weather"], level="INFO")
 
-# MongoDB: optional collection override (defaults to `log`)
-results = cab.log_query(tags=["audit"], collection_name="audit_logs")
-
-# File mode: query today's file (log_file defaults to today's LOG_DAILY_*.log)
+# Query today's file (log_file defaults to today's LOG_DAILY_*.log)
 results = cab.log_query(tags=["weather"])
 
 # File mode: query a specific file name
@@ -541,6 +596,7 @@ results = cab.log_query(
 ```
 
 terminal:
+
 ```bash
 # Query today's log (defaults to today if no log file specified)
 cabinet --query --query-tags "weather"
@@ -575,7 +631,7 @@ cabinet -q "LOG_DAILY_2025-09-27.log" --query-tags "backup,weather" --query-leve
 
 ### `log_query_issues`
 
-Returns formatted log lines at **WARNING**, **ERROR**, or **CRITICAL** within **`since`** (`timedelta` or UTC-aware `datetime`; **default: last 24 hours**). Uses the same storage as **`log_query`**: MongoDB when **`mongodb_enabled`** is true, otherwise scans today’s and yesterday’s daily files. If a Mongo query raises, results come from files without raising.
+Returns formatted log lines at **WARNING**, **ERROR**, or **CRITICAL** within **since** (`timedelta` or UTC-aware `datetime`; **default: last 24 hours**). Scans **today’s** and **yesterday’s** daily **`.log`** files under **`path_dir_log`** (same line format as **`log_query`**).
 
 ```python
 from datetime import timedelta
@@ -590,25 +646,24 @@ for line in cab.log_query_issues():
 lines = cab.log_query_issues(since=timedelta(days=2))
 ```
 
-### `log_query_documents`
+### `log_query_loki`, `log_query_documents_loki`, `log_query_issues_loki`
 
-**MongoDB only** (raises `ValueError` if `mongodb_enabled` is false). Returns raw **documents** (newest first), with optional **`level`**, **`since`**, **`collection_name`**, and **`limit`**. Use **`since=timedelta(hours=24)`** for “last 24 hours,” or a timezone-aware **`datetime`** as an absolute cutoff.
+Loki-backed queries (HTTP to **`logging.loki_url`**). Same filter ideas as **`log_query`** and **`log_query_issues`**: **since** / **end**, **level**, **hostname**, **tags**, **path** (source file substring), **message**, **date_filter**, **log_file** (matches Promtail’s **`filename`** label when present), **limit**. Returns formatted lines or **`dict`** rows with **`timestamp`** as **`datetime`** (UTC) plus **`_loki`** metadata.
 
-python:
 ```python
 from datetime import timedelta
 from cabinet import Cabinet
 
 cab = Cabinet()
 
-rows = cab.log_query_documents(level="error", since=timedelta(days=7), limit=100)
-for doc in rows:
-    print(doc.get("timestamp"), doc.get("message"))
+lines = cab.log_query_loki(level="error", since=timedelta(days=7), limit=100)
+rows = cab.log_query_documents_loki(since=timedelta(hours=24), limit=50)
+issues = cab.log_query_issues_loki(since=timedelta(hours=24))
 ```
 
 ### `logdb`
 
-Removed in **3.0.0** — see [Breaking changes in 3.0.0](#breaking-changes-in-300). Use **`cab.log(...)`** and **`cab.log_query*`** helpers instead.
+Removed in **3.0.0** — see [Breaking changes in 3.0.0](#breaking-changes-in-300). Use **`cab.log(...)`**, **`cab.log_query()`** / **`cab.log_query_issues()`**, and the **`cab.log_query*_loki()`** helpers instead.
 
 ## UI Module
 
@@ -639,3 +694,4 @@ result = confirmation("Do you want to proceed?", "Confirmation")
   - [GitHub](https://www.github.com/tylerjwoodfin)
   - [LinkedIn](https://www.linkedin.com/in/tylerjwoodfin)
   - [Website](http://tyler.cloud)
+

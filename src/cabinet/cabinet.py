@@ -76,6 +76,10 @@ class Cabinet:
     path_file_cache: str = f"{path_dir_config}/cache.json"
     path_file_data: str = f"{path_dir_cabinet}/data.json"
     editor: str = "nano"
+    logging_loki_enabled: bool = False
+    logging_loki_url: str = ""
+    logging_loki_job: str = "cabinet"
+    logging_loki_query_timeout: int = 30
     cached_data: dict = {}
     is_new_setup: bool = False
 
@@ -399,6 +403,29 @@ class Cabinet:
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
             sys.exit(-1)
+
+        # Optional ``logging`` object: Promtail/Loki JSONL + optional ``log_dir`` override.
+        self.logging_loki_enabled = False
+        self.logging_loki_url = ""
+        self.logging_loki_job = "cabinet"
+        self.logging_loki_query_timeout = 30
+        logging_cfg = self._get_config("logging", warn_missing=False)
+        if isinstance(logging_cfg, dict):
+            self.logging_loki_enabled = helpers.parse_config_bool(
+                logging_cfg.get("loki_enabled", False)
+            )
+            log_dir_override = logging_cfg.get("log_dir")
+            if isinstance(log_dir_override, str) and log_dir_override.strip():
+                self.path_dir_log = helpers.resolve_path(log_dir_override.strip())
+            loki_url = logging_cfg.get("loki_url")
+            if isinstance(loki_url, str) and loki_url.strip():
+                self.logging_loki_url = loki_url.strip().rstrip("/")
+            loki_job = logging_cfg.get("loki_job")
+            if isinstance(loki_job, str) and loki_job.strip():
+                self.logging_loki_job = loki_job.strip()
+            lqt = logging_cfg.get("loki_query_timeout")
+            if isinstance(lqt, (int, float)) and lqt > 0:
+                self.logging_loki_query_timeout = int(lqt)
 
         self.is_new_setup = False
 
@@ -1132,17 +1159,12 @@ class Cabinet:
         log_folder_path: str | None = None,
         is_quiet: bool | None = None,
         tags: list[str] | None = None,
-        collection_name: str | None = None,
     ) -> None:
         """
         Logs a message using the specified log level.
 
-        When ``mongodb_enabled`` is true and ``log_folder_path`` is not set, the message is
-        written to a daily file under ``path_dir_log`` first, then appended to the ``log``
-        collection in MongoDB. If MongoDB is unavailable, the file entry still succeeds, a
-        WARNING line with the error is appended to the same daily file, and stderr also prints
-        a warning. Pass ``log_folder_path`` to use **only** that directory
-        for files (no MongoDB write).
+        Writes only to local files (classic ``.log`` plus optional ``.jsonl`` when
+        ``logging.loki_enabled`` is set).
 
         Args:
             message (str, optional): The message to log. Defaults to ''.
@@ -1150,9 +1172,9 @@ class Cabinet:
             level (str, optional): The log level to use.
                 Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
                 Defaults to 'info'.
-            log_folder_path (str, optional): Directory for daily log files; if set, uses
-                **only** file logging (MongoDB write skipped). Defaults to None (file under
-                ``path_dir_log``, then MongoDB when enabled).
+            log_folder_path (str, optional): Directory for daily log files (under this path,
+                a ``YYYY-MM-DD`` subfolder is still used unless you also customize layout via
+                ``log_name``). Defaults to None (uses ``path_dir_log``).
             is_quiet (bool, optional):
                 If True, logging output will be silenced.
                 If False, logging output will be printed to the console.
@@ -1161,8 +1183,6 @@ class Cabinet:
                 A list of tags to associate with the log entry.
                 Tags are used to filter log entries.
                 Defaults to None.
-            collection_name (str, optional): MongoDB collection name when logging to the
-                database. Defaults to ``log``.
 
         Raises:
             ValueError: If an invalid log level is provided.
@@ -1179,7 +1199,6 @@ class Cabinet:
             log_folder_path=log_folder_path,
             is_quiet=is_quiet,
             tags=tags,
-            collection_name=collection_name,
         )
 
     def log_query(
@@ -1191,17 +1210,15 @@ class Cabinet:
         level: str | None = None,
         date_filter: str | None = None,
         message: str | None = None,
-        collection_name: str | None = None,
         since: timedelta | datetime | None = None,
     ) -> list[str]:
         """
         Query logs by various criteria.
 
-        When ``mongodb_enabled`` is true, queries the ``log`` collection in MongoDB and
-        returns formatted lines. Otherwise searches log files under ``path_dir_log``.
+        Searches log files under ``path_dir_log``.
 
         Args:
-            log_file (str, optional): Path to the log file to search (file mode only).
+            log_file (str, optional): Path to the log file to search.
             tags (list[str], optional): List of tags to filter by.
             path (str, optional): Fuzzy search on the source file path. Case-insensitive.
             hostname (str, optional): Filter by hostname.
@@ -1209,10 +1226,8 @@ class Cabinet:
                 ERROR, CRITICAL).
             date_filter (str, optional): Filter by date (YYYY-MM-DD format).
             message (str, optional): Search within the message text. Case-insensitive.
-            collection_name (str, optional): MongoDB collection (MongoDB mode only);
-                defaults to ``log``.
-            since (optional): Same semantics as :meth:`log_query_documents` — only entries
-                at or after this UTC time, or within this ``timedelta`` of now.
+            since (optional): Only entries at or after this UTC time, or within this
+                ``timedelta`` of now (compared using the log line’s local timestamp).
 
         Returns:
             list[str]: List of matching log lines.
@@ -1227,49 +1242,109 @@ class Cabinet:
             level=level,
             date_filter=date_filter,
             message=message,
-            collection_name=collection_name,
             since=since,
-        )
-
-    def log_query_documents(
-        self,
-        *,
-        level: str | None = None,
-        since: timedelta | datetime | None = None,
-        collection_name: str | None = None,
-        limit: int = 500,
-    ) -> list[dict]:
-        """
-        Return log documents from MongoDB (newest first), with optional level and
-        time filters. ``since`` may be a :class:`~datetime.timedelta` (how far back
-        from now) or a timezone-aware datetime cutoff.
-
-        Requires ``mongodb_enabled``.
-        """
-        return log_module.log_query_documents(
-            self,
-            level=level,
-            since=since,
-            collection_name=collection_name,
-            limit=limit,
         )
 
     def log_query_issues(
         self,
         *,
         since: timedelta | datetime | None = None,
-        collection_name: str | None = None,
     ) -> list[str]:
         """
         Return WARNING, ERROR, and CRITICAL log lines within ``since`` (default: last 24 hours).
 
-        Uses MongoDB when enabled; if a query fails or MongoDB is off, falls back to recent
-        daily files under ``path_dir_log``. Lines are deduplicated and sorted by time.
+        Reads today’s and yesterday’s daily files under ``path_dir_log``.
+        Lines are deduplicated and sorted by time.
         """
         return log_module.cabinet_log_query_issues(
             self,
             since=since,
-            collection_name=collection_name,
+        )
+
+    def log_query_loki(
+        self,
+        log_file: str | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        hostname: str | None = None,
+        level: str | None = None,
+        date_filter: str | None = None,
+        message: str | None = None,
+        since: timedelta | datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """
+        Like :meth:`log_query`, but reads from **Grafana Loki** (Cabinet JSONL streams).
+
+        Requires ``logging.loki_url`` in config (e.g. ``http://127.0.0.1:3100``). Uses HTTP
+        to Loki’s query API.
+        """
+        return log_module.cabinet_log_query_loki(
+            self,
+            log_file=log_file,
+            tags=tags,
+            path=path,
+            hostname=hostname,
+            level=level,
+            date_filter=date_filter,
+            message=message,
+            since=since,
+            end=end,
+            limit=limit,
+        )
+
+    def log_query_documents_loki(
+        self,
+        *,
+        level: str | None = None,
+        since: timedelta | datetime | None = None,
+        end: datetime | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        hostname: str | None = None,
+        message: str | None = None,
+        date_filter: str | None = None,
+        log_file: str | None = None,
+        limit: int = 500,
+    ) -> list[dict]:
+        """
+        Return structured log dicts from **Loki** (JSONL fields), newest first.
+
+        Each entry includes a ``timestamp`` (:class:`~datetime.datetime`, UTC) and ``_loki``
+        metadata. Requires ``logging.loki_url``.
+        """
+        return log_module.cabinet_log_query_documents_loki(
+            self,
+            level=level,
+            since=since,
+            end=end,
+            tags=tags,
+            path=path,
+            hostname=hostname,
+            message=message,
+            date_filter=date_filter,
+            log_file=log_file,
+            limit=limit,
+        )
+
+    def log_query_issues_loki(
+        self,
+        *,
+        since: timedelta | datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """
+        Like :meth:`log_query_issues`, but reads **warning / error / critical** from **Loki**.
+
+        Requires ``logging.loki_url``.
+        """
+        return log_module.cabinet_log_query_issues_loki(
+            self,
+            since=since,
+            end=end,
+            limit=limit,
         )
 
     def get_file_as_array(
@@ -1520,7 +1595,7 @@ def main():
         "-l",
         type=str,
         dest="log",
-        help="Log a message (file + best-effort MongoDB log collection when enabled, else file only)",
+        help="Log a message (local files only; optional JSONL for Promtail when logging.loki_enabled)",
     )
     parser.add_argument(
         "--level",
