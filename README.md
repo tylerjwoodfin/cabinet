@@ -158,8 +158,59 @@ Your `config.json` should look something like this:
     "editor": "nvim",
     "mongodb_enabled": true,
     "mongodb_connection_string": "<your connection string>",
+    "logging": {
+        "loki_enabled": true,
+        "log_dir": "/home/you/.local/share/cabinet/log",
+        "loki_url": "http://my-loki-host.tail1234.ts.net:3100"
+    }
 }
 ```
+
+Use a directory that exists only on **this** machine. If you previously used something like `~/syncthing/...` for logs, move `path_dir_log` (and `logging.log_dir` if set) to a non-synced path such as **`~/.local/share/cabinet/log`** or **`~/.cache/cabinet/log`**.
+
+The `**logging**` object is optional. `loki_enabled` turns on parallel **JSON Lines** files (`*.jsonl`) next to each `*.log` on **that machine’s local disk** for local Promtail to scrape. `**loki_url`** enables `**cab.log_query*_loki(...)**` helpers against a Loki server (central or tunneled). `**log_dir**`, when set, overrides the on-disk log directory for `cab.log()` (if omitted, top-level `**path_dir_log**` is used).
+
+### Logging and Loki (optional)
+
+**Architecture (multi-machine):**
+
+```text
+log() → local *.log + *.jsonl (this host only) → Promtail (this host) → Loki (one central server) → Grafana
+```
+
+- **File-first:** Every `cab.log()` / `cabinet -l` line goes to the classic `**.log`** format on **local disk**.
+- **Do not share log directories:** Set `path_dir_log` / `logging.log_dir` to a **local-only** directory on each machine. **Do not** use Syncthing, NFS, or other shared folders for Cabinet logs: multiple writers to the same files cause sync conflicts, torn lines, duplicate or missing ingestion, and undefined ordering. That pattern is unsupported.
+  - **Syncthing:** Even if Cabinet’s config lives under a synced tree, point **`path_dir_log`** at something **outside** your Syncthing folders (for example **`~/.local/share/cabinet/log`** or **`~/.cache/cabinet/log`**). **`mkdir -p ~/.local/share/cabinet/log`** on each host before logging.
+- **No log push HTTP:** `cab.log()` never POSTs to Loki; **Promtail on each machine** tails local `*.jsonl` and pushes to Loki. **Reads** from Loki (`cab.log_query*_loki`) use HTTP only when **`logging.loki_url`** is set.
+- **Optional JSONL:** With `logging.loki_enabled`, each event also appends one JSON object per line to `**LOG_DAILY_<date>.jsonl`** in the same date folder (fields include `timestamp`, `level`, `message`, `tags`, `source`, `hostname` from `socket.gethostname()` on that host).
+- **Install Loki, Grafana, and Promtail (this repo’s Docker stack):** You need **[Docker](https://docs.docker.com/engine/install/)** and the **[Docker Compose plugin](https://docs.docker.com/compose/install/)** on any machine that will run containers. Upstream docs: **[Grafana Loki](https://grafana.com/docs/loki/latest/)**, **[Promtail](https://grafana.com/docs/loki/latest/send-data/promtail/)**, source **[github.com/grafana/loki](https://github.com/grafana/loki)**.
+  - **Central server (Loki + Grafana):** One host runs the stack so all Promtail agents can push to it.
+    ```bash
+    cd /path/to/your/checkout/docker/loki
+    cp .env.example .env    # optional: set GRAFANA_PORT
+    docker compose up -d
+    ```
+    This starts **Loki** (port **3100** by default) and **Grafana** (host port from `.env`; login **admin** / **admin**). It does **not** start Promtail.
+  - **Each Cabinet host (Promtail only):** In the same **`docker/loki`** directory, copy **`promtail.env.example`** → **`promtail.env`**, set **`LOKI_URL`** (reachable from that host) and **`CABINET_LOG_DIR`** (same absolute path as **`path_dir_log`** / **`logging.log_dir`** in that machine’s Cabinet config), then:
+    ```bash
+    cd /path/to/your/checkout/docker/loki
+    docker compose --env-file promtail.env -f docker-compose.promtail.yml up -d
+    ```
+    More detail, including **`host.docker.internal`** vs LAN IP for **`LOKI_URL`**, is in **[`../docker/loki/README.md`](../docker/loki/README.md)** (sibling of this **`cabinet`** repo when both live under the same parent directory).
+- **Multi-machine example:** Host **cloud** runs Cabinet → local JSONL → Promtail → Loki; host **rainbow** same; host **ice** same. In Grafana Explore, filter by source host with LogQL labels such as `{job="cabinet", hostname="rainbow"}` (hostname comes from the JSON line).
+- **Turn off Loki shipping:** Set `loki_enabled` to `false`, or stop Promtail on that host. Cabinet does not require Docker.
+- **Explore logs in Grafana:** **Explore** → datasource **Loki** → e.g. `{job="cabinet"}` or `{job="cabinet", hostname="cloud"}`.
+- **Query from Python (Loki):** Set **`logging.loki_url`** to a **Tailscale** or **LAN** base URL for the Loki host (e.g. `http://cloud.tail….ts.net:3100`), not a public hostname unless you intentionally expose Loki. Use `**cab.log_query_loki(...)`**, `**cab.log_query_documents_loki(...)**`, `**cab.log_query_issues_loki(...)**`. Optional `**logging.loki_job**` (default `cabinet`, must match Promtail’s `job` label) and `**logging.loki_query_timeout**` (seconds, default `30`).
+- **Config example (logging + Loki reads):**
+  ```json
+  "logging": {
+      "loki_enabled": true,
+      "log_dir": "/home/you/.local/share/cabinet/log",
+      "loki_url": "http://my-loki-host.tail1234.ts.net:3100",
+      "loki_job": "cabinet",
+      "loki_query_timeout": 30
+  }
+  ```
 
 ### edit_file() shortcuts
 - see example below to enable something like
