@@ -12,6 +12,8 @@ This release changes how logging works. Plan upgrades accordingly.
 - `**cab.log_query()` and `cabinet --query`:** Search **log files** under `path_dir_log` only. MongoDB is for Cabinet’s **configuration/data** collection, not logs. Optional `**since`** filters by UTC cutoff or `timedelta` (compared using each line’s local timestamp).
 - `**cab.log_query_issues()`:** Returns **WARNING**, **ERROR**, and **CRITICAL** lines for the last 24 hours by default by scanning today’s and yesterday’s daily files under `path_dir_log`.
 - `**cab.log_query_documents()` removed:** Use **Loki/Grafana** for centralized structured log views, or read `**.jsonl`** / `**.log**` files directly.
+- **`cab.remove()` / `cabinet --remove`:** Only applied when **MongoDB** is enabled. With **local JSON** storage (`mongodb_enabled: false`), Cabinet **does not** change `~/.cabinet/data.json`; it prints that removal is MongoDB-only—use **`cabinet -e`** / **`--edit-file`** or edit the file directly.
+- **`cab.export()` / `cabinet --export`:** Writes a timestamped JSON file under **`~/.cabinet/export`**. With **MongoDB**, that snapshot matches the cached collection export; with **local** storage, it writes a **pretty-printed** copy of **`~/.cabinet/data.json`**.
 
 - [Breaking change in 2.0.0](#breaking-change-in-200)
 - [Cabinet](#cabinet)
@@ -26,15 +28,16 @@ This release changes how logging works. Plan upgrades accordingly.
   - [Configuration](#configuration)
     - [Logging and Loki (optional)](#logging-and-loki-optional)
     - [editfile() shortcuts](#edit_file-shortcuts)
-    - [mail](#mail)
+    - [`mail` (configuration)](#mail-configuration)
   - [Examples](#examples)
     - `[put](#put)`
     - `[get](#get)`
     - `[remove](#remove)`
+    - `[export](#export)`
     - `[append](#append)`
     - `[edit](#edit)`
     - `[edit_file](#edit_file)`
-    - `[mail](#mail-1)`
+    - [Sending mail](#sending-mail)
     - `[log](#log)`
     - `[log_query](#log_query)`
     - `[log_query_issues](#log_query_issues)`
@@ -47,8 +50,8 @@ This release changes how logging works. Plan upgrades accordingly.
 
 - Access your data across multiple projects
 - Log messages to **local** files under `path_dir_log` (and optional **local `*.jsonl`** for that host’s Promtail). `**cab.log_query()**` / `**cab.log_query_issues()**` read **files**; `**cab.log_query*_loki()`** reads **Loki** when `**logging.loki_url`** is set. MongoDB is only for **Cabinet data**, not logs.
-- Edit MongoDB as though it were a JSON file (Cabinet **data** only, not logs)
-- Send mail from the terminal
+- Store Cabinet **data** in **MongoDB** or **`~/.cabinet/data.json`**; edit it like a JSON document (**`-e`** / **`cab.edit_cabinet()`**), export snapshots (**`--export`**), and use **`--remove`** only with MongoDB enabled
+- Send mail from the terminal (SMTP **`email.port`** accepts a number or numeric string; **`email.to`** may be a string, comma-separated addresses, or a JSON array—same idea as **`--to`** on the CLI)
 - Library for interactive command-line interface components using `prompt_toolkit`
 
 ### Breaking change in 2.0.0
@@ -97,66 +100,36 @@ pytest
 ## Structure
 
 - Data is stored in `~/.cabinet/data.json` or MongoDB
-  - data from MongoDB is interacted with as if it were a JSON file
-  - cache is written when retrieving data.
-  - if cache is older than 1 hour, it is refreshed; otherwise, data is pulled from cache by default
+  - Data from MongoDB is interacted with as if it were a JSON file.
+  - With MongoDB enabled, Cabinet keeps **`~/.config/cabinet/cache.json`**: it is refreshed when missing, when you use **`--force-cache-update`** / **`force_cache_update=True`**, or when the cache file is **older than one hour**; otherwise reads use the cache by default.
 - **Logs:** `**cab.log()`** / `**cabinet --log**` append to `**path_dir_log/<YYYY-MM-DD>/**` on **that machine only**. Optional **JSONL** for `**logging.loki_enabled`** (scraped by **Promtail on the same host**). `**cab.log_query()`** / `**cab.log_query_issues()**` scan local `**.log**` files. `**cab.log_query_loki()**` / `**cab.log_query_documents_loki()**` / `**cab.log_query_issues_loki()**` query **Loki** via `**logging.loki_url`**. MongoDB stores Cabinet **variables** only, not logs.
 
 ## CLI usage
 
-Run `cabinet --help` for the authoritative list. Summary:
+Run `cabinet --help` for the full list (wording matches your installed version). Summary:
 
-```
-usage: cabinet [-h] [--configure] [--edit] [--edit-file EDIT_FILE]
-               [--force-cache-update] [--no-create] [--get GET ...]
-               [--put PUT ...] [--append APPEND ...] [--remove REMOVE ...]
-               [--get-file GET_FILE] [--export] [--strip] [--log LOG]
-               [--level LOG_LEVEL] [--tags LOG_TAGS] [--editor EDITOR]
-               [--query [LOG_QUERY_FILE]] [--query-tags QUERY_TAGS]
-               [--query-path QUERY_PATH] [--query-hostname QUERY_HOSTNAME]
-               [--query-level QUERY_LEVEL] [--query-date QUERY_DATE]
-               [--query-message QUERY_MESSAGE] [--mail]
-               [--subject SUBJECT] [--body BODY] [--to TO_ADDR] [-v]
+| Flag | Role |
+|------|------|
+| `--configure` / `-config` | Setup; writes `~/.config/cabinet/config.json` |
+| `--edit` / `-e` | Edit Cabinet **data** as JSON (MongoDB via cache file, or `~/.cabinet/data.json` locally) |
+| `--edit-file` / `-ef` | Edit a path or shortcut under `path.edit.*` |
+| `--force-cache-update` | Refresh MongoDB cache before reads |
+| `--no-create` | With `-ef`, do not create a missing file |
+| `--get` / `-g` | Read nested keys from Cabinet data |
+| `--put` / `-p` | Write nested keys to Cabinet data |
+| `--append` / `-a` | Append to a string or list value |
+| `--remove` / `-rm` | Remove nested keys (**MongoDB only**; with local JSON, Cabinet prints guidance and does not modify the file) |
+| `--get-file` | Read a file under `~/.cabinet` (or configured notes path) |
+| `--export` | Write timestamped JSON to `~/.cabinet/export/` (Mongo snapshot or local `data.json`) |
+| `--strip` | With `--get-file`, do **not** strip whitespace (default strips) |
+| `--log` / `-l`, `--level`, `--tags` | Append to local log files (optional JSONL when `logging.loki_enabled`) |
+| `--editor` | Override editor for `--edit` / `--edit-file` |
+| `--query` / `-q` | Search **log files** under `path_dir_log` (optional log name; default today’s file) |
+| `--query-tags`, `--query-path`, `--query-hostname`, `--query-level`, `--query-date`, `--query-message` | Filters for `--query` |
+| `--mail`, `--subject` / `-s`, `--body` / `-b`, `--to` / `-t` | Send mail; `--to` may be comma-separated addresses |
+| `--version` / `-v` | Print package version |
 
-Options:
-  -h, --help            show this help message and exit
-  --configure, -config  Configure
-  --edit, -e            Edit Cabinet's MongoDB as a JSON file
-  --edit-file, -ef EDIT_FILE
-                        Edit a specific file
-  --force-cache-update  Disable using the cache for MongoDB queries
-  --no-create           (for -ef) Do not create file if it does not exist
-  --get, -g GET ...     Get a property from MongoDB
-  --put, -p PUT ...     Put a property into MongoDB
-  --append, -a APPEND ...
-                        Append to a string or array (e.g. cabinet -a fruits banana)
-  --remove, -rm REMOVE ...
-                        Remove a property from MongoDB
-  --get-file GET_FILE   Get file
-  --export              Export MongoDB to ~/.cabinet/export
-  --strip               (for --get-file) Surrounding whitespace is stripped by default; pass this flag to read file content without stripping
-  --log, -l LOG         Log a message (local files; optional JSONL when logging.loki_enabled)
-  --level LOG_LEVEL     (for -l) Log level [debug, info, warn, error, critical]
-  --tags LOG_TAGS       (for -l) Comma-separated tags for the log entry
-  --editor EDITOR       (for --edit and --edit-file) Specify an editor
-  --query, -q [LOG_QUERY_FILE]
-                        Query log files (optional file name; defaults to today)
-  --query-tags ...      (for --query) Comma-separated tags to filter by
-  --query-path ...      (for --query) Filter by file path (fuzzy search)
-  --query-hostname ...  (for --query) Filter by hostname
-  --query-level ...     (for --query) Filter by log level [debug, info, warning, error, critical]
-  --query-date ...      (for --query) Filter by date (YYYY-MM-DD)
-  --query-message ...   (for --query) Search within message text
-  -v, --version         Display the Cabinet version
-
-Mail:
-  --mail                Sends an email (requires --subject and --body)
-  --subject, -s SUBJECT Email subject
-  --body, -b BODY       Email body
-  --to, -t TO_ADDR      To address(es)
-```
-
-`--query` searches **log files** under `path_dir_log`, the same as Python `**Cabinet.log_query`**.
+`--query` matches Python **`Cabinet.log_query()`** (file-based logs only, not the Cabinet data store).
 
 ## Configuration
 
@@ -269,10 +242,12 @@ cabinet -p edit shopping value "~/path/to/whatever.md"
 cabinet -p edit todo value "~/path/to/whatever.md"
 ```
 
-### mail
+### `mail` (configuration)
 
 - It is NEVER a good idea to store your password openly either locally or in MongoDB; for this reason, I recommend a "throwaway" account that is only used for sending emails, such as a custom domain email.
 - Gmail and most other mainstream email providers won't work with this; for support, search for sending mail from your email provider with `smtplib`.
+- **`email.port`:** May be a JSON number or a **string** (e.g. `"587"`). Cabinet normalizes it to an integer in the valid TCP range.
+- **`email.to`:** May be a single address **string**, comma-separated addresses in one string, or a JSON **array** of strings (or mix)—same rules as the CLI **`--to`** / **`Mail.send(..., to_addr=...)`**.
 - In Cabinet (`cabinet -e`), add the `email` object to make your settings file look like this example:
 
 file:
@@ -286,7 +261,7 @@ file:
         "to": "destination@protonmail.com",
         "smtp_server": "example.com",
         "imap_server": "example.com",
-        "port": 123
+        "port": 587
     }
 }
 ```
@@ -377,17 +352,38 @@ or terminal:
 cabinet -rm employee Tyler salary
 ```
 
-results in this structure in MongoDB:
+results in this structure in MongoDB (local `data.json` follows the same shape):
 
 ```json
 {
     "employee": {
-        "tyler": {}
+        "Tyler": {}
     }
 }
 ```
 
-### `append`
+When **`mongodb_enabled`** is **false**, **`cab.remove()`** / **`cabinet --remove`** **do not** edit `~/.cabinet/data.json`; Cabinet prints that removal requires MongoDB. Use **`cabinet -e`**, **`cabinet --edit-file`**, or edit the JSON file directly.
+
+### `export`
+
+Writes a **timestamped** JSON file under **`~/.cabinet/export/`**.
+
+- **MongoDB:** Exports the same JSON snapshot used for the editor cache (collection dump).
+- **Local:** Reads **`~/.cabinet/data.json`** and writes pretty-printed JSON.
+
+python:
+
+```python
+from cabinet import Cabinet
+
+Cabinet().export()
+```
+
+terminal:
+
+```bash
+cabinet --export
+```
 
 Appends a value to an existing string (concatenation) or array. For other types (bool, int, float, etc.), prints a graceful error. Prints the updated value.
 
@@ -428,6 +424,9 @@ cabinet -a person tyler fruits banana
 - **Missing key:** Not allowed.
 
 ### `edit`
+
+- With **MongoDB**, opens the JSON **cache** file that mirrors the `cabinet` collection; on save, changes are written back to MongoDB.
+- With **local** storage, opens **`~/.cabinet/data.json`**.
 
 terminal:
 
@@ -477,9 +476,7 @@ cabinet -ef shopping
 cabinet -ef "/path/to/shopping.md"
 ```
 
-### `mail`
-
-python:
+### Sending mail
 
 ```python
 
@@ -498,9 +495,13 @@ cabinet --mail --subject "Test Subject" --body "Test Body"
 # or
 
 cabinet --mail -s "Test Subject" -b "Test Body"
+
+# optional recipients (comma-separated); otherwise `email.to` from Cabinet is used
+
+cabinet --mail -s "Hi" -b "Hello" -t "one@example.com, two@example.com"
 ```
 
-### `log`
+If **`--to`** / **`-t`** is omitted, **`email.to`** from Cabinet data is used (see [mail configuration](#mail-configuration)).
 
 `**cab.log()**` / `**cabinet --log**` write only to **local files** (classic `**.log`** lines). There are **no** network calls. If `**logging.loki_enabled`** is true in `config.json`, each event also appends a structured line to a matching **local `.jsonl`** file for **Promtail on that host** to ship to **central Loki**. Failures to write are printed to **stderr** and do not propagate as exceptions from `log()`.
 
