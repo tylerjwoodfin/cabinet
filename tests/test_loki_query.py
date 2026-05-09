@@ -40,6 +40,22 @@ def _patch_urlopen_body(payload: dict):
     return patch("cabinet.log.urllib.request.urlopen", return_value=cm)
 
 
+def test_loki_query_range_invalid_json_raises():
+    cm = MagicMock()
+    cm.__enter__.return_value.read.return_value = b"<!DOCTYPE html><p>oops</p>"
+    cm.__exit__.return_value = None
+    with patch("cabinet.log.urllib.request.urlopen", return_value=cm):
+        cab = _cab()
+        with pytest.raises(RuntimeError, match="not valid JSON"):
+            loki_query_range(
+                cab,
+                '{job="cabinet"}',
+                limit=10,
+                start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                end=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            )
+
+
 def test_loki_query_range_parses_streams():
     payload = {
         "status": "success",

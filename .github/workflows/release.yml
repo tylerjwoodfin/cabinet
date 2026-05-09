@@ -15,13 +15,18 @@ jobs:
     steps:
     # Checkout the repository
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     # Set up Python
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
+
+    - name: Install package and run tests
+      run: |
+        pip install -e ".[dev]"
+        pytest tests/ -v
 
     # Install Pex
     - name: Install Pex
@@ -35,27 +40,37 @@ jobs:
     - name: Build PyPI package
       run: python -m build
 
-    # Publish to PyPI
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-      run: |
-        echo "TWINE_PASSWORD length: ${#TWINE_PASSWORD}"
-        python -m twine upload dist/* --verbose
-
-    # Create and push tag
+    # Create and push tag (before PyPI so a publish always has a corresponding tag)
     - name: Create and push tag
       id: create_tag
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         VERSION=$(grep -oP '^version\s*=\s*\K.+' setup.cfg)
+        TAG="v$VERSION"
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        git tag "v$VERSION"
-        git push https://x-access-token:${GITHUB_TOKEN}@github.com/tylerjwoodfin/cabinet.git "v$VERSION"
-        echo "tag=v$VERSION" >> $GITHUB_ENV
+        git fetch --tags --quiet origin 2>/dev/null || true
+        if git show-ref --verify --quiet "refs/tags/$TAG"; then
+          echo "Skipping tag create/push: $TAG already exists (same version as a previous release)."
+          echo "tag=$TAG" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+          echo "Skipping tag push: origin already has $TAG; not creating a duplicate."
+          echo "tag=$TAG" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        git tag "$TAG"
+        git push https://x-access-token:${GITHUB_TOKEN}@github.com/tylerjwoodfin/cabinet.git "$TAG"
+        echo "tag=$TAG" >> "$GITHUB_ENV"
+
+    # Publish to PyPI
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+      run: python -m twine upload dist/* --verbose
 
     # Upload Pex file to GitHub Releases
     - name: Upload Pex file to GitHub Releases
