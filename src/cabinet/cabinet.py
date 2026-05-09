@@ -21,7 +21,7 @@ import threading
 import pathlib
 import argparse
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Type, Optional, TypeVar, Union
 from importlib.metadata import version
 import pymongo.errors
@@ -1038,20 +1038,9 @@ class Cabinet:
                     # If no specific return_type is needed, return as Any
                     return result
 
-        # handle MongoDB
-        cache_update_needed = force_cache_update
-
-        # Check if cache data is available and not expired
-        if (
-            not force_cache_update
-            and hasattr(self, "cached_data")
-            and "expiresAt" in self.cached_data
-        ):
-
-            expires_at = datetime.fromisoformat(self.cached_data["expiresAt"])
-            cache_update_needed = datetime.now(timezone.utc) >= expires_at
-
-        if cache_update_needed or not self.cached_data:
+        # handle MongoDB — ``cached_data`` is a list of documents; refresh when forced
+        # or empty. Staleness uses the cache file mtime in :meth:`update_cache`.
+        if force_cache_update or not self.cached_data:
             self.update_cache()
 
         # Process the cached data
