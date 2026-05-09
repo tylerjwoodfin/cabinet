@@ -8,3 +8,4 @@ database.json
 cache.json
 build/
 .cache
+.venv/
