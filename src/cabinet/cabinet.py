@@ -398,8 +398,8 @@ class Cabinet:
             if getattr(self, key) is None or getattr(self, key) == ""
         ]
         if missing_keys:
-            newline = "\n"
-            print(f"Missing required values:{newline}{newline}-".join(missing_keys))
+            listed = "\n- " + "\n- ".join(missing_keys)
+            print(f"Missing required values:{listed}\n")
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
             sys.exit(-1)
@@ -1099,6 +1099,9 @@ class Cabinet:
         """
         Removes a property from the data in the MongoDB collection.
 
+        When MongoDB is disabled (local JSON storage only), this is a no-op; a short
+        message is printed. Use a direct edit of ``path_file_data`` or enable MongoDB.
+
         Args:
             attribute: A variable length argument list representing \
                 the nested structure of the attribute to remove.
@@ -1110,6 +1113,14 @@ class Cabinet:
 
         if not attribute or len(attribute) < 1:
             raise ValueError("At least one attribute must be provided")
+
+        if not self.mongodb_enabled:
+            print(
+                "remove is only supported when MongoDB is enabled. "
+                "With local storage, edit ~/.cabinet/data.json directly "
+                "(e.g. cabinet --edit-file) or enable MongoDB in config."
+            )
+            return
 
         custom_filter = {}
 
@@ -1458,9 +1469,30 @@ class Cabinet:
 
     def export(self):
         """
-        Exports all data in MongoDB to JSON
+        Exports Cabinet data to a timestamped JSON file under ~/.cabinet/export.
+
+        Uses the MongoDB cache export when ``mongodb_enabled`` is true; otherwise
+        writes the contents of the local ``path_file_data`` JSON (pretty-printed).
         """
-        cache = self.update_cache()
+        if self.mongodb_enabled:
+            text = self.update_cache() or ""
+        else:
+            try:
+                with open(self.path_file_data, "r", encoding="utf-8") as data_file:
+                    data = json.load(data_file)
+                text = json.dumps(data, indent=4)
+            except FileNotFoundError:
+                self.log(
+                    f"export: local data file not found at {self.path_file_data}",
+                    level="error",
+                )
+                return
+            except json.JSONDecodeError as e:
+                self.log(
+                    f"export: invalid JSON in {self.path_file_data}: {e}",
+                    level="error",
+                )
+                return
 
         path_export = pathlib.Path("~/.cabinet/export").expanduser()
 
@@ -1473,9 +1505,16 @@ class Cabinet:
         file_name = f"cabinet export {formatted_datetime}"
 
         with open(path_export / file_name, "w", encoding="utf-8") as file:
-            file.write(cache or "")
+            file.write(text)
 
         self.log(f"Exported to {path_export / file_name}")
+
+
+def _parse_mail_recipients(raw: str | None) -> list[str] | None:
+    """Split ``--to`` into a list of addresses (comma-separated)."""
+    if raw is None or not str(raw).strip():
+        return None
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
 
 
 def main():
@@ -1729,7 +1768,7 @@ def main():
         tags = None
         if args.query_tags:
             tags = [tag.strip() for tag in args.query_tags.split(",")]
-        
+
         # Execute query
         try:
             results = cab.log_query(
@@ -1741,7 +1780,7 @@ def main():
                 date_filter=args.query_date,
                 message=args.query_message,
             )
-            
+
             if results:
                 for result in results:
                     print(result)
@@ -1755,10 +1794,11 @@ def main():
     elif args.export:
         cab.export()
     elif args.mail:
-        to_addr = None
-        if args.to_addr:
-            to_addr = "".join(args.to_addr).split(",")
-        Mail().send(args.subject, args.body, to_addr=to_addr)
+        Mail().send(
+            args.subject,
+            args.body,
+            to_addr=_parse_mail_recipients(args.to_addr),
+        )
     else:
         parser.print_help()
 

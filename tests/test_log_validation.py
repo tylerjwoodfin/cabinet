@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -126,8 +126,6 @@ def test_cabinet_log_forced_folder_with_mongo_enabled(tmp_path):
 
 
 def test_cabinet_log_query_reads_files_even_when_mongodb_enabled(tmp_path):
-    from datetime import date
-
     today = date.today()
     day_dir = tmp_path / str(today)
     day_dir.mkdir(parents=True)
@@ -153,8 +151,6 @@ def test_cabinet_log_query_reads_files_even_when_mongodb_enabled(tmp_path):
 
 
 def test_cabinet_log_query_issues_file_scan(tmp_path):
-    from datetime import date
-
     today = date.today()
     day_dir = tmp_path / str(today)
     day_dir.mkdir(parents=True)
@@ -189,11 +185,17 @@ def test_cabinet_log_query_issues_file_scan(tmp_path):
     assert "too old" not in out[0]
 
 
+def test_cabinet_log_query_when_log_root_missing_no_listdir_crash(tmp_path):
+    """If today's file is absent and ``path_dir_log`` does not exist, fail cleanly."""
+    cab = SimpleNamespace(path_dir_log=str(tmp_path / "no_such_log_dir"))
+    today = date.today().isoformat()
+    with pytest.raises(FileNotFoundError, match="Log file not found"):
+        cabinet_log_query(cab, log_file=f"LOG_DAILY_{today}.log")
+
+
 def test_cabinet_log_query_file_mode_since_accepts_asctime_without_fractional_seconds(
     tmp_path,
 ):
-    from datetime import date
-
     today = date.today()
     day_dir = tmp_path / str(today)
     day_dir.mkdir(parents=True)
@@ -212,3 +214,12 @@ def test_cabinet_log_query_file_mode_since_accepts_asctime_without_fractional_se
     )
     assert len(out) == 1
     assert "hello" in out[0]
+
+
+def test_parse_mail_recipients():
+    from cabinet.cabinet import _parse_mail_recipients
+
+    assert _parse_mail_recipients(None) is None
+    assert _parse_mail_recipients("  ") is None
+    assert _parse_mail_recipients("a@b.com") == ["a@b.com"]
+    assert _parse_mail_recipients("a@b.com, c@d.com ") == ["a@b.com", "c@d.com"]

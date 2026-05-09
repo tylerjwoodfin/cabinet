@@ -276,13 +276,13 @@ def cabinet_log_query(
             log_file_path = os.path.join(cabinet.path_dir_log, today, log_file)
 
             if not os.path.exists(log_file_path):
-                for date_dir in os.listdir(cabinet.path_dir_log):
-                    potential_path = os.path.join(
-                        cabinet.path_dir_log, date_dir, log_file
-                    )
-                    if os.path.exists(potential_path):
-                        log_file_path = potential_path
-                        break
+                log_root = cabinet.path_dir_log
+                if os.path.isdir(log_root):
+                    for date_dir in os.listdir(log_root):
+                        potential_path = os.path.join(log_root, date_dir, log_file)
+                        if os.path.exists(potential_path):
+                            log_file_path = potential_path
+                            break
     else:
         log_file_path = log_file
 
@@ -507,7 +507,8 @@ def loki_query_range(
     Raises:
         ValueError: If ``logging.loki_url`` is not set.
         urllib.error.URLError: On network/HTTP failures.
-        RuntimeError: If Loki returns a non-success status.
+        RuntimeError: If Loki returns an error HTTP status, non-success JSON payload,
+            or a response body that is not valid JSON.
     """
     base = _require_loki_url(cabinet)
     if end is None:
@@ -524,10 +525,18 @@ def loki_query_range(
     timeout = _loki_query_timeout_s(cabinet)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
+            raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Loki HTTP {exc.code}: {detail}") from exc
+
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        preview = raw if len(raw) <= 500 else f"{raw[:500]}..."
+        raise RuntimeError(
+            f"Loki response was not valid JSON: {exc}; body starts with {preview!r}"
+        ) from exc
 
     if body.get("status") != "success":
         raise RuntimeError(body.get("error") or body.get("message") or str(body))
