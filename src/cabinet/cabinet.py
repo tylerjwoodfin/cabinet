@@ -17,19 +17,14 @@ import os
 import ast
 import sys
 import json
-import re
-import logging
-import socket
 import threading
 import pathlib
 import argparse
 import subprocess
-from html import escape
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Type, Optional, TypeVar, Union
 from importlib.metadata import version
 import pymongo.errors
-from prompt_toolkit import print_formatted_text, HTML
 from pymongo.errors import PyMongoError, OperationFailure, ConnectionFailure
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
@@ -59,6 +54,7 @@ from .constants import (
     WARN_NETWORK_TIMEOUT_NO_CACHE,
 )
 from .mail import Mail
+from . import log as log_module
 
 
 class Cabinet:
@@ -80,6 +76,10 @@ class Cabinet:
     path_file_cache: str = f"{path_dir_config}/cache.json"
     path_file_data: str = f"{path_dir_cabinet}/data.json"
     editor: str = "nano"
+    logging_loki_enabled: bool = False
+    logging_loki_url: str = ""
+    logging_loki_job: str = "cabinet"
+    logging_loki_query_timeout: int = 30
     cached_data: dict = {}
     is_new_setup: bool = False
 
@@ -332,20 +332,36 @@ class Cabinet:
 
         keys = ["mongodb_enabled", "editor", "path_dir_log"]
 
-        # for compatibility, set mongodb_enabled to True if all MongoDB keys are present
-        if all(self._get_config(key, warn_missing=False) for key in keys[1:]):
-            if self._get_config("mongodb_enabled", warn_missing=False) == "":
-                self._put_config("mongodb_enabled", True)
-                self.mongodb_enabled = True
+        mongo_uri_early = self._get_config(
+            "mongodb_connection_string", warn_missing=False
+        )
+        mongo_db_early = self._get_config("mongodb_db_name", warn_missing=False)
+        mongo_flag_early = self._get_config("mongodb_enabled", warn_missing=False)
 
-        # If MongoDB is enabled, include MongoDB-specific keys in the check
-        if self._get_config("mongodb_enabled", warn_missing=False) or False:
+        # URI + DB name mean Mongo is intended; turn the flag on if it was left blank.
+        if (
+            mongo_uri_early
+            and mongo_db_early
+            and mongo_flag_early in ("", None)
+        ):
+            self._put_config("mongodb_enabled", True)
+
+        # Legacy: set mongodb_enabled if editor and path_dir_log are set but flag is blank
+        if all(self._get_config(key, warn_missing=False) for key in keys[1:]):
+            if self._get_config("mongodb_enabled", warn_missing=False) in ("", None):
+                self._put_config("mongodb_enabled", True)
+
+        if helpers.parse_config_bool(
+            self._get_config("mongodb_enabled", warn_missing=False)
+        ):
             keys.extend(["mongodb_db_name", "mongodb_connection_string"])
 
         for key in keys:
             value = self._get_config(key, warn_missing=False)
 
-            if isinstance(value, str):
+            if key == "mongodb_enabled":
+                value = helpers.parse_config_bool(value)
+            elif isinstance(value, str):
                 value = os.path.expandvars(os.path.expanduser(value))
 
             if key == "path_dir_log" and value == "":
@@ -382,11 +398,34 @@ class Cabinet:
             if getattr(self, key) is None or getattr(self, key) == ""
         ]
         if missing_keys:
-            newline = "\n"
-            print(f"Missing required values:{newline}{newline}-".join(missing_keys))
+            listed = "\n- " + "\n- ".join(missing_keys)
+            print(f"Missing required values:{listed}\n")
             input(ERROR_CONFIG_MISSING_VALUES)
             self.config()
             sys.exit(-1)
+
+        # Optional ``logging`` object: Promtail/Loki JSONL + optional ``log_dir`` override.
+        self.logging_loki_enabled = False
+        self.logging_loki_url = ""
+        self.logging_loki_job = "cabinet"
+        self.logging_loki_query_timeout = 30
+        logging_cfg = self._get_config("logging", warn_missing=False)
+        if isinstance(logging_cfg, dict):
+            self.logging_loki_enabled = helpers.parse_config_bool(
+                logging_cfg.get("loki_enabled", False)
+            )
+            log_dir_override = logging_cfg.get("log_dir")
+            if isinstance(log_dir_override, str) and log_dir_override.strip():
+                self.path_dir_log = helpers.resolve_path(log_dir_override.strip())
+            loki_url = logging_cfg.get("loki_url")
+            if isinstance(loki_url, str) and loki_url.strip():
+                self.logging_loki_url = loki_url.strip().rstrip("/")
+            loki_job = logging_cfg.get("loki_job")
+            if isinstance(loki_job, str) and loki_job.strip():
+                self.logging_loki_job = loki_job.strip()
+            lqt = logging_cfg.get("loki_query_timeout")
+            if isinstance(lqt, (int, float)) and lqt > 0:
+                self.logging_loki_query_timeout = int(lqt)
 
         self.is_new_setup = False
 
@@ -999,20 +1038,9 @@ class Cabinet:
                     # If no specific return_type is needed, return as Any
                     return result
 
-        # handle MongoDB
-        cache_update_needed = force_cache_update
-
-        # Check if cache data is available and not expired
-        if (
-            not force_cache_update
-            and hasattr(self, "cached_data")
-            and "expiresAt" in self.cached_data
-        ):
-
-            expires_at = datetime.fromisoformat(self.cached_data["expiresAt"])
-            cache_update_needed = datetime.now(timezone.utc) >= expires_at
-
-        if cache_update_needed or not self.cached_data:
+        # handle MongoDB — ``cached_data`` is a list of documents; refresh when forced
+        # or empty. Staleness uses the cache file mtime in :meth:`update_cache`.
+        if force_cache_update or not self.cached_data:
             self.update_cache()
 
         # Process the cached data
@@ -1060,6 +1088,9 @@ class Cabinet:
         """
         Removes a property from the data in the MongoDB collection.
 
+        When MongoDB is disabled (local JSON storage only), this is a no-op; a short
+        message is printed. Use a direct edit of ``path_file_data`` or enable MongoDB.
+
         Args:
             attribute: A variable length argument list representing \
                 the nested structure of the attribute to remove.
@@ -1071,6 +1102,14 @@ class Cabinet:
 
         if not attribute or len(attribute) < 1:
             raise ValueError("At least one attribute must be provided")
+
+        if not self.mongodb_enabled:
+            print(
+                "remove is only supported when MongoDB is enabled. "
+                "With local storage, edit ~/.cabinet/data.json directly "
+                "(e.g. cabinet --edit-file) or enable MongoDB in config."
+            )
+            return
 
         custom_filter = {}
 
@@ -1122,8 +1161,10 @@ class Cabinet:
         tags: list[str] | None = None,
     ) -> None:
         """
-        Logs a message using the specified log level
-        and writes it to a file if a file path is provided.
+        Logs a message using the specified log level.
+
+        Writes only to local files (classic ``.log`` plus optional ``.jsonl`` when
+        ``logging.loki_enabled`` is set).
 
         Args:
             message (str, optional): The message to log. Defaults to ''.
@@ -1131,11 +1172,11 @@ class Cabinet:
             level (str, optional): The log level to use.
                 Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
                 Defaults to 'info'.
-            log_folder_path (str, optional): The path to the log file.
-                If not provided, logs will be saved to MongoDB -> path -> log.
-                Defaults to None.
-            is_quiet (bool, optional): 
-                If True, logging output will be silenced. 
+            log_folder_path (str, optional): Directory for daily log files (under this path,
+                a ``YYYY-MM-DD`` subfolder is still used unless you also customize layout via
+                ``log_name``). Defaults to None (uses ``path_dir_log``).
+            is_quiet (bool, optional):
+                If True, logging output will be silenced.
                 If False, logging output will be printed to the console.
                 If None (default), defaults to True if level is Debug, otherwise False.
             tags (list[str], optional):
@@ -1150,111 +1191,15 @@ class Cabinet:
             None
         """
 
-        if not message:
-            raise ValueError("Message cannot be empty")
-
-        if level is None:
-            level = "info"
-
-        if level == "warn":
-            level = "warning"
-
-        # Default is_quiet to True if level is Debug (only if not explicitly set)
-        if is_quiet is None:
-            is_quiet = level.lower() == "debug"
-
-        valid_levels = {"debug", "info", "warning", "error", "critical"}
-        if level.lower() not in valid_levels:
-            raise ValueError(
-                f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}."
-            )
-
-        # Set up color mapping for console output
-        color_map = {
-            "debug": "ansiwhite",
-            "info": "ansigreen",
-            "warning": "ansiyellow",
-            "error": "ansired",
-            "critical": "ansimagenta",
-        }
-
-        # Custom console handler to only print colored level and message
-        class ColorConsoleHandler(logging.StreamHandler):
-            """
-            Allows for colorful console logs
-            """
-
-            def emit(self, record):
-                color = color_map[record.levelname.lower()]
-                msg = self.format(record)
-                escaped_msg = escape(msg)
-
-                print_formatted_text(
-                    HTML(f"<{color}>" f"{record.levelname}: {escaped_msg}</{color}>")
-                )
-
-        # Configure logger
-        today = str(date.today())
-        log_folder_path = log_folder_path or os.path.join(self.path_dir_log, today)
-        log_folder_path = os.path.expanduser(log_folder_path)
-
-        if not os.path.exists(log_folder_path):
-            os.makedirs(log_folder_path)
-
-        if log_name is None:
-            log_name = f"LOG_DAILY_{today}"
-
-        # Get or create logger
-        logger = logging.getLogger(log_name)
-        logger.setLevel(getattr(logging, level.upper()))
-
-        # Clear existing handlers if they exist
-        if logger.hasHandlers():
-            logger.handlers = []
-
-        # File handler for writing complete logs
-        file_handler = logging.FileHandler(
-            os.path.join(log_folder_path, f"{log_name}.log"), mode="a"
+        log_module.cabinet_log(
+            self,
+            message=message,
+            log_name=log_name,
+            level=level,
+            log_folder_path=log_folder_path,
+            is_quiet=is_quiet,
+            tags=tags,
         )
-
-        # Determine the caller's filename and line number
-        caller_file = "unknown"
-        caller_line = 0
-        stack = inspect.stack()
-        for frame_info in stack:
-            module = inspect.getmodule(frame_info.frame)
-            module_name = module.__name__ if module else None
-            if module_name and module_name != __name__ and "logging" not in module_name:
-                caller_file = os.path.join(
-                    os.path.basename(os.path.dirname(frame_info.filename)),
-                    os.path.basename(frame_info.filename),
-                )
-                caller_line = frame_info.lineno
-                break
-
-        hostname = socket.gethostname()
-
-        # Format tags if provided
-        tags_str = ""
-        if tags:
-            tags_str = f" [{','.join(tags)}]"
-
-        file_handler.setFormatter(
-            logging.Formatter(
-                f"%(asctime)s — %(levelname)s{tags_str} -> {caller_file}:{caller_line}"
-                f"@{hostname} -> %(message)s"
-            )
-        )
-        logger.addHandler(file_handler)
-
-        # Add color console handler if not is_quiet
-        if not is_quiet:
-            console_handler = ColorConsoleHandler()
-            console_handler.setFormatter(logging.Formatter("%(message)s"))
-            logger.addHandler(console_handler)
-
-        # Log the message
-        getattr(logger, level.lower())(message)
 
     def log_query(
         self,
@@ -1265,247 +1210,142 @@ class Cabinet:
         level: str | None = None,
         date_filter: str | None = None,
         message: str | None = None,
+        since: timedelta | datetime | None = None,
     ) -> list[str]:
         """
-        Query log files by various criteria.
+        Query logs by various criteria.
+
+        Searches log files under ``path_dir_log``.
 
         Args:
-            log_file (str, optional): Path to the log file to search. Can be absolute or
-                relative to log directory. If not provided, defaults to today's log file.
-            tags (list[str], optional): List of tags to filter by. Returns logs
-                containing any of these tags.
-            path (str, optional): Fuzzy search on the file path (after the
-                arrow). Case-insensitive.
+            log_file (str, optional): Path to the log file to search.
+            tags (list[str], optional): List of tags to filter by.
+            path (str, optional): Fuzzy search on the source file path. Case-insensitive.
             hostname (str, optional): Filter by hostname.
             level (str, optional): Filter by log level (DEBUG, INFO, WARNING,
                 ERROR, CRITICAL).
             date_filter (str, optional): Filter by date (YYYY-MM-DD format).
-            message (str, optional): Search within the message text.
-                Case-insensitive.
+            message (str, optional): Search within the message text. Case-insensitive.
+            since (optional): Only entries at or after this UTC time, or within this
+                ``timedelta`` of now (compared using the log line’s local timestamp).
 
         Returns:
             list[str]: List of matching log lines.
-
-        Example:
-            >>> # Query today's log file
-            >>> cab.log_query(tags=["weather"], level="INFO")
-            
-            >>> # Query specific log file
-            >>> cab.log_query(
-            ...     "LOG_DAILY_2025-09-27.log",
-            ...     tags=["weather"],
-            ...     level="INFO"
-            ... )
         """
 
-        # Default to today's log file if not provided
-        if log_file is None:
-            today = str(date.today())
-            log_file = f"LOG_DAILY_{today}.log"
-
-        # Resolve log file path
-        if not os.path.isabs(log_file):
-            # Try to find the log file in the log directory
-            if date_filter:
-                log_file_path = os.path.join(self.path_dir_log, date_filter, log_file)
-            else:
-                # Search in today's log directory by default
-                today = str(date.today())
-                log_file_path = os.path.join(self.path_dir_log, today, log_file)
-
-                # If not found in today's directory, search all date directories
-                if not os.path.exists(log_file_path):
-                    for date_dir in os.listdir(self.path_dir_log):
-                        potential_path = os.path.join(
-                            self.path_dir_log, date_dir, log_file
-                        )
-                        if os.path.exists(potential_path):
-                            log_file_path = potential_path
-                            break
-        else:
-            log_file_path = log_file
-
-        if not os.path.exists(log_file_path):
-            raise FileNotFoundError(f"Log file not found: {log_file_path}")
-
-        # Regular expression to parse log lines
-        # Format: timestamp — level [tags] -> path:line@hostname -> message
-        # Tags are optional
-        log_pattern = re.compile(
-            r"^(?P<timestamp>[^\s]+\s+[^\s]+)\s+—\s+(?P<level>\w+)"
-            r"(?:\s+\[(?P<tags>[^\]]+)\])?\s+->\s+"
-            r"(?P<path>[^:]+):(?P<line>\d+)@(?P<hostname>\S+)\s+->\s+"
-            r"(?P<message>.+)$"
+        return log_module.cabinet_log_query(
+            self,
+            log_file=log_file,
+            tags=tags,
+            path=path,
+            hostname=hostname,
+            level=level,
+            date_filter=date_filter,
+            message=message,
+            since=since,
         )
 
-        matching_lines = []
-
-        try:
-            with open(log_file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    match = log_pattern.match(line)
-                    if not match:
-                        continue
-
-                    log_data = match.groupdict()
-
-                    # Apply filters
-                    if level and log_data["level"].upper() != level.upper():
-                        continue
-
-                    if hostname and log_data["hostname"] != hostname:
-                        continue
-
-                    if date_filter and not log_data["timestamp"].startswith(
-                        date_filter
-                    ):
-                        continue
-
-                    if message and message.lower() not in log_data["message"].lower():
-                        continue
-
-                    if path and path.lower() not in log_data["path"].lower():
-                        continue
-
-                    if tags:
-                        # Extract tags from log entry
-                        log_tags_str = log_data.get("tags", "")
-                        if log_tags_str:
-                            log_tags = [t.strip() for t in log_tags_str.split(",")]
-                            # Check if any of the requested tags are in the log tags
-                            if not any(tag in log_tags for tag in tags):
-                                continue
-                        else:
-                            # No tags in this log entry, skip it
-                            continue
-
-                    matching_lines.append(line)
-
-        except Exception as e:
-            raise RuntimeError(
-                f"Error reading log file {log_file_path}: {str(e)}"
-            ) from e
-
-        return matching_lines
-
-    def logdb(
+    def log_query_issues(
         self,
-        message: str = "",
-        db_name: str | None = None,
-        cluster_name: str | None = None,
-        collection_name: str = "logs",
+        *,
+        since: timedelta | datetime | None = None,
+    ) -> list[str]:
+        """
+        Return WARNING, ERROR, and CRITICAL log lines within ``since`` (default: last 24 hours).
+
+        Reads today’s and yesterday’s daily files under ``path_dir_log``.
+        Lines are deduplicated and sorted by time.
+        """
+        return log_module.cabinet_log_query_issues(
+            self,
+            since=since,
+        )
+
+    def log_query_loki(
+        self,
+        log_file: str | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        hostname: str | None = None,
         level: str | None = None,
-        is_quiet: bool = False,
-    ) -> None:
+        date_filter: str | None = None,
+        message: str | None = None,
+        since: timedelta | datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500,
+    ) -> list[str]:
         """
-        Logs a message to MongoDB using the specified database and cluster names.
-        Falls back to configured values if not provided.
+        Like :meth:`log_query`, but reads from **Grafana Loki** (Cabinet JSONL streams).
 
-        Args:
-            message (str, optional): The message to log. Defaults to ''.
-            db_name (str, optional): The name of the MongoDB database to use.
-                If not provided, uses the configured database name.
-            cluster_name (str, optional): The name of the MongoDB cluster to use.
-                If not provided, use cluster from `mongodb_connection_string`.
-            collection_name (str, optional): The name of the collection to store logs in.
-                Defaults to 'logs'.
-            level (str, optional): The log level to use.
-                Must be one of 'debug', 'info', 'warning', 'error', or 'critical'.
-                Defaults to 'info'.
-            is_quiet (bool, optional): Whether to suppress console output.
-                Defaults to False.
-        Raises:
-            ValueError: If an invalid log level is provided or MongoDB is not enabled.
-            pymongo.errors.PyMongoError: If there is an error connecting to MongoDB.
-
-        Returns:
-            None
+        Requires ``logging.loki_url`` in config (e.g. ``http://127.0.0.1:3100``). Uses HTTP
+        to Loki’s query API.
         """
-        if not self.mongodb_enabled:
-            raise ValueError("MongoDB must be enabled to use logdb")
+        return log_module.cabinet_log_query_loki(
+            self,
+            log_file=log_file,
+            tags=tags,
+            path=path,
+            hostname=hostname,
+            level=level,
+            date_filter=date_filter,
+            message=message,
+            since=since,
+            end=end,
+            limit=limit,
+        )
 
-        if not message:
-            raise ValueError("Message cannot be empty")
+    def log_query_documents_loki(
+        self,
+        *,
+        level: str | None = None,
+        since: timedelta | datetime | None = None,
+        end: datetime | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        hostname: str | None = None,
+        message: str | None = None,
+        date_filter: str | None = None,
+        log_file: str | None = None,
+        limit: int = 500,
+    ) -> list[dict]:
+        """
+        Return structured log dicts from **Loki** (JSONL fields), newest first.
 
-        if level is None:
-            level = "info"
+        Each entry includes a ``timestamp`` (:class:`~datetime.datetime`, UTC) and ``_loki``
+        metadata. Requires ``logging.loki_url``.
+        """
+        return log_module.cabinet_log_query_documents_loki(
+            self,
+            level=level,
+            since=since,
+            end=end,
+            tags=tags,
+            path=path,
+            hostname=hostname,
+            message=message,
+            date_filter=date_filter,
+            log_file=log_file,
+            limit=limit,
+        )
 
-        if level == "warn":
-            level = "warning"
+    def log_query_issues_loki(
+        self,
+        *,
+        since: timedelta | datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """
+        Like :meth:`log_query_issues`, but reads **warning / error / critical** from **Loki**.
 
-        valid_levels = {"debug", "info", "warning", "error", "critical"}
-        if level.lower() not in valid_levels:
-            raise ValueError(
-                f"Invalid log level: {level}. Must be in {', '.join(valid_levels)}."
-            )
-
-        # Use provided values or fall back to configured ones
-        db_name = db_name or self.mongodb_db_name
-        cluster_name = cluster_name or self.mongodb_cluster_name
-
-        try:
-            # Determine the caller's filename and line number
-            stack = inspect.stack()
-            caller_file = "unknown"
-            caller_line = 0
-            for frame_info in stack:
-                module = inspect.getmodule(frame_info.frame)
-                module_name = module.__name__ if module else None
-                if (
-                    module_name
-                    and module_name != __name__
-                    and "logging" not in module_name
-                ):
-                    caller_file = os.path.join(
-                        os.path.basename(os.path.dirname(frame_info.filename)),
-                        os.path.basename(frame_info.filename),
-                    )
-                    caller_line = frame_info.lineno
-                    break
-
-            # Create log entry
-            log_entry = {
-                "timestamp": datetime.now(timezone.utc),
-                "level": level.upper(),
-                "message": message,
-                "source": {"file": caller_file, "line": caller_line},
-            }
-
-            # Insert the log entry
-            self._mongodb_with_timeout(
-                lambda: self.database[collection_name].insert_one(log_entry)
-            )
-
-            # Print to console with color (matching the log method's behavior)
-            color_map = {
-                "debug": "ansiwhite",
-                "info": "ansigreen",
-                "warning": "ansiyellow",
-                "error": "ansired",
-                "critical": "ansimagenta",
-            }
-            color = color_map[level.lower()]
-            escaped_msg = escape(message)
-            if not is_quiet:
-                print_formatted_text(
-                    HTML(f"<{color}>{level.upper()}: {escaped_msg}</{color}>")
-                )
-        except pymongo.errors.InvalidURI as error:
-            print(f"Invalid MongoDB URI: {error}")
-            raise
-        except pymongo.errors.ServerSelectionTimeoutError as error:
-            print(f"MongoDB connection timeout: {error}")
-            raise
-        except pymongo.errors.ConfigurationError as error:
-            print(f"MongoDB configuration error: {error}")
-            raise
-        except Exception as error:
-            print(f"Unexpected error while logging to MongoDB: {error}")
-            raise
+        Requires ``logging.loki_url``.
+        """
+        return log_module.cabinet_log_query_issues_loki(
+            self,
+            since=since,
+            end=end,
+            limit=limit,
+        )
 
     def get_file_as_array(
         self,
@@ -1618,9 +1458,30 @@ class Cabinet:
 
     def export(self):
         """
-        Exports all data in MongoDB to JSON
+        Exports Cabinet data to a timestamped JSON file under ~/.cabinet/export.
+
+        Uses the MongoDB cache export when ``mongodb_enabled`` is true; otherwise
+        writes the contents of the local ``path_file_data`` JSON (pretty-printed).
         """
-        cache = self.update_cache()
+        if self.mongodb_enabled:
+            text = self.update_cache() or ""
+        else:
+            try:
+                with open(self.path_file_data, "r", encoding="utf-8") as data_file:
+                    data = json.load(data_file)
+                text = json.dumps(data, indent=4)
+            except FileNotFoundError:
+                self.log(
+                    f"export: local data file not found at {self.path_file_data}",
+                    level="error",
+                )
+                return
+            except json.JSONDecodeError as e:
+                self.log(
+                    f"export: invalid JSON in {self.path_file_data}: {e}",
+                    level="error",
+                )
+                return
 
         path_export = pathlib.Path("~/.cabinet/export").expanduser()
 
@@ -1633,9 +1494,16 @@ class Cabinet:
         file_name = f"cabinet export {formatted_datetime}"
 
         with open(path_export / file_name, "w", encoding="utf-8") as file:
-            file.write(cache or "")
+            file.write(text)
 
         self.log(f"Exported to {path_export / file_name}")
+
+
+def _parse_mail_recipients(raw: str | None) -> list[str] | None:
+    """Split ``--to`` into a list of addresses (comma-separated)."""
+    if raw is None or not str(raw).strip():
+        return None
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
 
 
 def main():
@@ -1755,10 +1623,7 @@ def main():
         "-l",
         type=str,
         dest="log",
-        help="Log a message to the default location",
-    )
-    parser.add_argument(
-        "--logdb", "-ldb", type=str, dest="logdb", help="Log a message to MongoDB"
+        help="Log a message (local files only; optional JSONL for Promtail when logging.loki_enabled)",
     )
     parser.add_argument(
         "--level",
@@ -1778,19 +1643,7 @@ def main():
         dest="editor",
         help="(for --edit and --edit-file) Specify an editor to use",
     )
-    parser.add_argument(
-        "--db-name",
-        type=str,
-        dest="db_name",
-        help="(for --logdb) Specify a database name",
-    )
-    parser.add_argument(
-        "--cluster-name",
-        type=str,
-        dest="cluster_name",
-        help="(for --logdb) Specify a cluster name",
-    )
-    
+
     # Log query arguments
     parser.add_argument(
         "--query",
@@ -1898,20 +1751,13 @@ def main():
         if args.log_tags:
             tags = [tag.strip() for tag in args.log_tags.split(",")]
         cab.log(message=args.log, level=args.log_level, tags=tags)
-    elif args.logdb:
-        cab.logdb(
-            message=args.logdb,
-            level=args.log_level,
-            db_name=args.db_name,
-            cluster_name=args.cluster_name,
-        )
     elif args.log_query_file is not None:
         # Parse query parameters
         log_file = args.log_query_file if args.log_query_file else None
         tags = None
         if args.query_tags:
             tags = [tag.strip() for tag in args.query_tags.split(",")]
-        
+
         # Execute query
         try:
             results = cab.log_query(
@@ -1923,7 +1769,7 @@ def main():
                 date_filter=args.query_date,
                 message=args.query_message,
             )
-            
+
             if results:
                 for result in results:
                     print(result)
@@ -1937,10 +1783,11 @@ def main():
     elif args.export:
         cab.export()
     elif args.mail:
-        to_addr = None
-        if args.to_addr:
-            to_addr = "".join(args.to_addr).split(",")
-        Mail().send(args.subject, args.body, to_addr=to_addr)
+        Mail().send(
+            args.subject,
+            args.body,
+            to_addr=_parse_mail_recipients(args.to_addr),
+        )
     else:
         parser.print_help()
 

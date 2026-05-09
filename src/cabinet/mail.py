@@ -7,16 +7,77 @@ Does not support Gmail.
 A throwaway email is highly recommended.
 """
 
-import smtplib
-from urllib.parse import unquote
-import socket
-import pwd
-import sys
+from __future__ import annotations
+
 import os
-from email.mime.text import MIMEText
+from collections.abc import Sequence
+import pwd
+import smtplib
+import socket
+import sys
 from email.mime.multipart import MIMEMultipart
-from prompt_toolkit import print_formatted_text, HTML
+from email.mime.text import MIMEText
+from urllib.parse import unquote
+
+from prompt_toolkit import HTML, print_formatted_text
+
 import cabinet
+
+
+def _coerce_smtp_port(value: object) -> int | None:
+    """
+    Normalize config/JSON values to a valid SMTP port integer.
+
+    Rejects booleans (JSON ``true``/``false`` are not ports), non-numeric strings,
+    and fractional floats.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 65535 else None
+    if isinstance(value, float):
+        if not value.is_integer():
+            return None
+        iv = int(value)
+        return iv if 1 <= iv <= 65535 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            iv = int(text, 10)
+        except ValueError:
+            return None
+        return iv if 1 <= iv <= 65535 else None
+    return None
+
+
+def _normalize_recipients(value: object) -> list[str] | None:
+    """
+    Turn Cabinet/config/CLI values into a non-empty list of recipient strings.
+
+    Accepts ``None``, a single address string (optionally comma-separated),
+    or a sequence (e.g. JSON array from ``cabinet.get``).
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        return parts or None
+    if isinstance(value, (list, tuple)):
+        out: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            s = str(item).strip()
+            if s:
+                out.extend(
+                    [p.strip() for p in s.split(",") if p.strip()]
+                )
+        return out or None
+    return None
 
 
 class Mail:
@@ -30,9 +91,8 @@ class Mail:
         self.user_dir = pwd.getpwuid(os.getuid())[0]
         self.cab = cabinet.Cabinet()
 
-        # parameters
-        # port should be int; TODO update Cabinet to support type casting
-        self.port = self.cab.get("email", "port")
+        raw_port = self.cab.get("email", "port")
+        self.port = _coerce_smtp_port(raw_port)
 
         self.smtp_server: str | None = self.cab.get("email", "smtp_server")
         self.imap_server: str | None = self.cab.get("email", "imap_server")
@@ -44,7 +104,7 @@ class Mail:
         subject: str,
         body: str,
         signature: str = "",
-        to_addr=None,  # should be List[str]; TODO update Cabinet to support type casting
+        to_addr: str | Sequence[object] | None = None,
         from_name: str | None = None,
         logging_enabled: bool = True,
         is_quiet: bool = False,
@@ -57,7 +117,8 @@ class Mail:
         - subject (str): The subject of the email.
         - body (str): The body of the email.
         - signature (str): The signature to include at the end of the email.
-        - to_addr (List): A list of email addresses to send the email to.
+        - to_addr: Recipient(s) as ``list[str]``, comma-separated ``str``, single ``str``,
+            or ``None`` to use ``cabinet -> email -> to`` (also normalized the same way).
         - from_name (str, optional): The name to appear in the "From" field of the email.
             Reads from cabinet -> email -> from_name if unset.
             If this is unset, defaults to machine's hostname or `Cabinet`
@@ -103,22 +164,21 @@ class Mail:
             level="debug"
         )
 
-        # Set default `to_addr` if unset.
         if to_addr is None:
-            to_addr = self.cab.get("email", "to")
+            to_addr = _normalize_recipients(self.cab.get("email", "to"))
             self.cab.log(
                 f"Mail.send() using default from config: {to_addr}",
-                level="debug"
+                level="debug",
             )
 
             if to_addr is None:
                 self.cab.log("cabinet -> email -> to is unset", level="error")
                 return
-
-        # Ensure to_addr is a list
-        # Cabinet may return a string, but we need a list for join()
-        if isinstance(to_addr, str):
-            to_addr = [to_addr]
+        else:
+            to_addr = _normalize_recipients(to_addr)
+            if to_addr is None:
+                self.cab.log("to_addr was empty after normalization", level="error")
+                return
 
         # Remove duplicates while preserving order
         seen = set()
@@ -145,13 +205,11 @@ class Mail:
             self.cab.log("No SMTP Server set", level="error")
             return
 
-        if not self.port:
-            self.cab.log("No port set", level="error")
-            return
-
-        if not isinstance(self.port, int):
+        if self.port is None:
             self.cab.log(
-                f"Port is not an integer (received '{self.port}')", level="error"
+                "No valid SMTP port (email.port must be an integer 1–65535, "
+                "e.g. 587 or 465)",
+                level="error",
             )
             return
 

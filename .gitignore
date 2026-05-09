@@ -9,3 +9,5 @@ cache.json
 build/
 .cache
 .venv/
+.DS_Store
+.pytest_cache/
