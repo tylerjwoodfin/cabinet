@@ -192,13 +192,13 @@ log() → local *.log + *.jsonl (this host only) → Promtail (this host) → Lo
   - **Each Cabinet host (Promtail only):** In the same **`docker/loki`** directory, copy **`promtail.env.example`** → **`promtail.env`**, set **`LOKI_URL`** (reachable from that host) and **`CABINET_LOG_DIR`** (same absolute path as **`path_dir_log`** / **`logging.log_dir`** in that machine’s Cabinet config), then:
     ```bash
     cd /path/to/your/checkout/docker/loki
-    docker compose -f docker-compose.promtail.yml up -d
+    docker compose --env-file promtail.env -f docker-compose.promtail.yml up -d
     ```
     More detail, including **`host.docker.internal`** vs LAN IP for **`LOKI_URL`**, is in **[`../docker/loki/README.md`](../docker/loki/README.md)** (sibling of this **`cabinet`** repo when both live under the same parent directory).
 - **Multi-machine example:** Host **cloud** runs Cabinet → local JSONL → Promtail → Loki; host **rainbow** same; host **ice** same. In Grafana Explore, filter by source host with LogQL labels such as `{job="cabinet", hostname="rainbow"}` (hostname comes from the JSON line).
 - **Turn off Loki shipping:** Set `loki_enabled` to `false`, or stop Promtail on that host. Cabinet does not require Docker.
 - **Explore logs in Grafana:** **Explore** → datasource **Loki** → e.g. `{job="cabinet"}` or `{job="cabinet", hostname="cloud"}`.
-- **Query from Python (Loki):** Set `**logging.loki_url`** to your **reachable** Loki base URL (e.g. `http://central:3100` or via VPN). Use `**cab.log_query_loki(...)`**, `**cab.log_query_documents_loki(...)**`, `**cab.log_query_issues_loki(...)**`. Optional `**logging.loki_job**` (default `cabinet`, must match Promtail’s `job` label) and `**logging.loki_query_timeout**` (seconds, default `30`).
+- **Query from Python (Loki):** Set **`logging.loki_url`** to your **reachable** Loki base URL—often **Tailscale**, **LAN**, or VPN (e.g. `http://central:3100`, `http://cloud.tail….ts.net:3100`); avoid a public hostname unless you intentionally expose Loki. Use `**cab.log_query_loki(...)`**, `**cab.log_query_documents_loki(...)**`, `**cab.log_query_issues_loki(...)**`. Optional `**logging.loki_job**` (default `cabinet`, must match Promtail’s `job` label) and `**logging.loki_query_timeout**` (seconds, default `30`).
 - **Config example (logging + Loki reads):**
   ```json
   "logging": {
