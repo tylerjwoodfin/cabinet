@@ -850,10 +850,13 @@ class Cabinet:
 
         if value is None:  # Check if value argument is None
             value = parse_arg(attribute[-1])
+            path = attribute[:-1]
+        else:
+            path = attribute
 
         cache = value
         json_structure = {}
-        for item in reversed(attribute[:-1]):
+        for item in reversed(path):
             try:
                 json_structure = {}
                 json_structure[item] = cache
@@ -882,9 +885,9 @@ class Cabinet:
         if self.mongodb_enabled:
             update = {"$set": {}}
 
-            if len(attribute) > 2:
-                update["$set"][attribute[0]] = self.merge_nested_data(
-                    existing_data.get(attribute[0], {}), json_structure[attribute[0]]
+            if len(path) > 1:
+                update["$set"][path[0]] = self.merge_nested_data(
+                    existing_data.get(path[0], {}), json_structure[path[0]]
                 )
             else:
                 update = {"$set": json_structure}
@@ -908,9 +911,9 @@ class Cabinet:
         if is_print:
             if self.mongodb_enabled:
                 print(f"Modified {result.modified_count} item(s)")
-                print(f"{' -> '.join(attribute[:-1])} set to {value}\n")
+                print(f"{' -> '.join(path)} set to {value}\n")
             else:
-                print(f"{' -> '.join(attribute[:-1])} set to {value}\n")
+                print(f"{' -> '.join(path)} set to {value}\n")
 
         self.update_cache()
 
