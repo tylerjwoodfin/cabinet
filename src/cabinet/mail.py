@@ -15,6 +15,7 @@ import pwd
 import smtplib
 import socket
 import sys
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import unquote
@@ -80,6 +81,40 @@ def _normalize_recipients(value: object) -> list[str] | None:
     return None
 
 
+DEFAULT_SMTP_MAX_RETRIES = 3
+DEFAULT_SMTP_RETRY_BASE_DELAY = 120
+
+
+def _coerce_positive_int(value: object, default: int) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    return default
+
+
+def _smtp_retry_delay_seconds(retry_number: int, base_delay: int) -> int:
+    """Seconds to wait before retry ``retry_number`` (1-based)."""
+    return base_delay * (2 ** (retry_number - 1))
+
+
+def _is_transient_smtp_error(err: BaseException) -> bool:
+    return isinstance(
+        err,
+        (
+            socket.timeout,
+            TimeoutError,
+            ConnectionError,
+            smtplib.SMTPServerDisconnected,
+            smtplib.SMTPConnectError,
+        ),
+    )
+
+
 class Mail:
     """
     Provides functionality for sending email using SMTP and MIMEText.
@@ -109,7 +144,9 @@ class Mail:
         logging_enabled: bool = True,
         is_quiet: bool = False,
         timeout: int = 4,
-    ) -> None:
+        max_retries: int | None = None,
+        retry_base_delay: int | None = None,
+    ) -> bool:
         """
         Sends an email with the given subject and body to the specified recipients.
 
@@ -128,13 +165,28 @@ class Mail:
             Defaults to False.
         - timeout (int, optional): Timeout in seconds for SMTP operations.
             Defaults to 4 seconds.
+        - max_retries (int, optional): Retries after transient SMTP failures.
+            Defaults to cabinet -> email -> smtp_max_retries or 3.
+        - retry_base_delay (int, optional): Base delay in seconds for exponential
+            backoff between retries. Defaults to cabinet -> email ->
+            smtp_retry_base_delay or 120.
 
-        Raises:
-        - smtplib.SMTPAuthenticationError: If the SMTP server rejects the login credentials.
-        - socket.timeout: If the SMTP operations exceed the timeout period.
+        Returns:
+        - bool: True if the email was sent, False otherwise.
 
         Gmail will almost certainly not work.
         """
+
+        if max_retries is None:
+            max_retries = _coerce_positive_int(
+                self.cab.get("email", "smtp_max_retries"),
+                DEFAULT_SMTP_MAX_RETRIES,
+            )
+        if retry_base_delay is None:
+            retry_base_delay = _coerce_positive_int(
+                self.cab.get("email", "smtp_retry_base_delay"),
+                DEFAULT_SMTP_RETRY_BASE_DELAY,
+            )
 
         hostname = socket.gethostname()
         if hostname:
@@ -173,12 +225,12 @@ class Mail:
 
             if to_addr is None:
                 self.cab.log("cabinet -> email -> to is unset", level="error")
-                return
+                return False
         else:
             to_addr = _normalize_recipients(to_addr)
             if to_addr is None:
                 self.cab.log("to_addr was empty after normalization", level="error")
-                return
+                return False
 
         # Remove duplicates while preserving order
         seen = set()
@@ -203,7 +255,7 @@ class Mail:
 
         if not self.smtp_server:
             self.cab.log("No SMTP Server set", level="error")
-            return
+            return False
 
         if self.port is None:
             self.cab.log(
@@ -211,68 +263,104 @@ class Mail:
                 "e.g. 587 or 465)",
                 level="error",
             )
-            return
+            return False
 
-        # Port 465 uses SSL/TLS directly, port 587 uses STARTTLS
-        server = None
-        try:
-            if self.port == 465:
-                server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
-            elif self.port == 587:
-                server = smtplib.SMTP(self.smtp_server, self.port, timeout=timeout)
-                server.starttls()
-            else:
-                # Default to SSL for other ports (backward compatibility)
-                server = smtplib.SMTP_SSL(self.smtp_server, self.port, timeout=timeout)
+        if not self.username or not self.password:
+            self.cab.log("Username/password not set", level="error")
+            return False
 
-            if not self.username or not self.password:
-                self.cab.log("Username/password not set", level="error")
-                return
-            
-            # Debug: Log the username being used (without password)
-            self.cab.log(
-                f"Attempting SMTP login with username: {self.username}",
-                level="debug"
-            )
-            
-            server.login(self.username, self.password)
-
-            # Send the email.
-            server.send_message(message)
-
-            if logging_enabled:
+        max_attempts = max_retries + 1
+        for attempt in range(1, max_attempts + 1):
+            server = None
+            try:
                 self.cab.log(
-                    f"Sent Email to {message['To']} as {message['From']}: {subject}",
+                    f"SMTP send attempt {attempt}/{max_attempts} for {subject!r}",
+                    level="info",
+                )
+                server = self._connect_smtp(timeout)
+                self.cab.log(
+                    f"Attempting SMTP login with username: {self.username}",
                     level="debug",
                 )
-            if not is_quiet:
-                print_formatted_text(HTML("<ansigreen><b>Email sent.</b></ansigreen>"))
+                server.login(self.username, self.password)
+                server.send_message(message)
 
-        except smtplib.SMTPAuthenticationError as err:
-            self.cab.log(
-                f"SMTP authentication failed for {self.username}.\n"
-                f"Error: {err}\n"
-                f"For Proton Mail, ensure:\n"
-                f"  1. Username matches the email address used when generating the SMTP token\n"
-                f"  2. Password is the SMTP token (not your regular password)\n"
-                f"  3. Token was generated for the correct email address",
-                level="error",
-            )
-        except (socket.timeout, smtplib.SMTPServerDisconnected) as err:
-            self.cab.log(
-                f"SMTP connection failed after {timeout} seconds: {err}", level="error"
-            )
-        finally:
-            # Always close the SMTP connection to prevent connection reuse issues
-            if server:
-                try:
-                    server.quit()
-                except Exception:
-                    # If quit() fails, try close() as fallback
+                if logging_enabled:
+                    self.cab.log(
+                        f"Sent Email to {message['To']} as {message['From']}: {subject}",
+                        level="debug",
+                    )
+                if attempt > 1:
+                    self.cab.log(
+                        f"SMTP send succeeded on attempt {attempt}/{max_attempts} "
+                        f"for {subject!r}",
+                        level="info",
+                    )
+                if not is_quiet:
+                    print_formatted_text(
+                        HTML("<ansigreen><b>Email sent.</b></ansigreen>")
+                    )
+                return True
+
+            except smtplib.SMTPAuthenticationError as err:
+                self.cab.log(
+                    f"SMTP authentication failed for {self.username}.\n"
+                    f"Error: {err}\n"
+                    f"For Proton Mail, ensure:\n"
+                    f"  1. Username matches the email address used when generating the SMTP token\n"
+                    f"  2. Password is the SMTP token (not your regular password)\n"
+                    f"  3. Token was generated for the correct email address",
+                    level="error",
+                )
+                return False
+            except Exception as err:
+                if not _is_transient_smtp_error(err):
+                    self.cab.log(
+                        f"SMTP send failed with non-retryable error: {err}",
+                        level="error",
+                    )
+                    return False
+
+                if attempt < max_attempts:
+                    delay = _smtp_retry_delay_seconds(attempt, retry_base_delay)
+                    self.cab.log(
+                        f"SMTP attempt {attempt}/{max_attempts} failed after "
+                        f"{timeout} seconds: {err}. Retrying in {delay} seconds.",
+                        level="warning",
+                    )
+                    time.sleep(delay)
+                else:
+                    self.cab.log(
+                        f"SMTP connection failed after {max_attempts} attempts "
+                        f"({timeout}s timeout each): {err}",
+                        level="error",
+                    )
+            finally:
+                if server:
                     try:
-                        server.close()
+                        server.quit()
                     except Exception:
-                        pass  # Connection may already be closed
+                        try:
+                            server.close()
+                        except Exception:
+                            pass
+
+        return False
+
+    def _connect_smtp(self, timeout: int) -> smtplib.SMTP:
+        """Open an authenticated-ready SMTP connection (login still required)."""
+        if self.port == 465:
+            server = smtplib.SMTP_SSL(
+                self.smtp_server, self.port, timeout=timeout
+            )
+        elif self.port == 587:
+            server = smtplib.SMTP(self.smtp_server, self.port, timeout=timeout)
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(
+                self.smtp_server, self.port, timeout=timeout
+            )
+        return server
 
 
 if __name__ == "__main__":
