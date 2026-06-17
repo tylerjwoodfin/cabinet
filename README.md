@@ -51,7 +51,7 @@ This release changes how logging works. Plan upgrades accordingly.
 - Access your data across multiple projects
 - Log messages to **local** files under `path_dir_log` (and optional **local `*.jsonl`** for that host’s Promtail). `**cab.log_query()**` / `**cab.log_query_issues()**` read **files**; `**cab.log_query*_loki()`** reads **Loki** when `**logging.loki_url`** is set. MongoDB is only for **Cabinet data**, not logs.
 - Store Cabinet **data** in **MongoDB** or **`~/.cabinet/data.json`**; edit it like a JSON document (**`-e`** / **`cab.edit_cabinet()`**), export snapshots (**`--export`**), and use **`--remove`** only with MongoDB enabled
-- Send mail from the terminal (SMTP **`email.port`** accepts a number or numeric string; **`email.to`** may be a string, comma-separated addresses, or a JSON array—same idea as **`--to`** on the CLI)
+- Send mail from the terminal (SMTP **`email.port`** accepts a number or numeric string; **`email.to`** may be a string, comma-separated addresses, or a JSON array—same idea as **`--to`** on the CLI). Transient SMTP failures are retried with exponential backoff and logged to Cabinet.
 - Library for interactive command-line interface components using `prompt_toolkit`
 
 ### Breaking change in 2.0.0
@@ -248,6 +248,9 @@ cabinet -p edit todo value "~/path/to/whatever.md"
 - Gmail and most other mainstream email providers won't work with this; for support, search for sending mail from your email provider with `smtplib`.
 - **`email.port`:** May be a JSON number or a **string** (e.g. `"587"`). Cabinet normalizes it to an integer in the valid TCP range.
 - **`email.to`:** May be a single address **string**, comma-separated addresses in one string, or a JSON **array** of strings (or mix)—same rules as the CLI **`--to`** / **`Mail.send(..., to_addr=...)`**.
+- **`email.smtp_max_retries`** (optional): Number of retries after a transient SMTP failure. Default **`3`** (4 attempts total including the first).
+- **`email.smtp_retry_base_delay`** (optional): Base delay in **seconds** for exponential backoff between retries. Default **`120`** (2 minutes). Delays double each retry: 2 min, 4 min, 8 min, …
+- Transient failures (timeouts, disconnects, connection errors) are retried automatically; authentication and configuration errors are not. Each attempt is logged via **`cab.log()`** (`info` on attempt start, `warning` before a retry, `error` when exhausted).
 - In Cabinet (`cabinet -e`), add the `email` object to make your settings file look like this example:
 
 file:
@@ -261,7 +264,9 @@ file:
         "to": "destination@protonmail.com",
         "smtp_server": "example.com",
         "imap_server": "example.com",
-        "port": 587
+        "port": 587,
+        "smtp_max_retries": 3,
+        "smtp_retry_base_delay": 120
     }
 }
 ```
@@ -484,7 +489,16 @@ from cabinet import Mail
 
 mail = Mail()
 
+# Returns True on success, False on failure (e.g. SMTP exhausted retries)
 mail.send('Test Subject', 'Test Body')
+
+# Optional per-call overrides for retry behavior
+mail.send(
+    'Test Subject',
+    'Test Body',
+    max_retries=2,
+    retry_base_delay=60,
+)
 ```
 
 terminal:
