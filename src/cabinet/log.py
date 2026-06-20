@@ -195,9 +195,9 @@ def write_log_file(
                 }
                 jsonl_path = os.path.join(resolved_folder, f"{resolved_log_name}.jsonl")
                 _append_jsonl_line(jsonl_path, payload)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 pass
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         print(f"Cabinet logging failed (ignored): {exc}", file=sys.stderr)
 
 
@@ -321,7 +321,8 @@ def cabinet_log_query(
                     continue
 
                 if since is not None:
-                    # File ``asctime`` is local wall time; match :func:`_collect_log_issue_lines_from_files`.
+                    # File ``asctime`` is local wall time; match
+                    # :func:`_collect_log_issue_lines_from_files`.
                     cutoff_naive = _file_issue_cutoff_naive(since)
                     parsed_ts = _parse_local_display_log_ts(log_data["timestamp"])
                     if parsed_ts is None or parsed_ts < cutoff_naive:

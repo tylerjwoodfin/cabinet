@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from email.mime.multipart import MIMEMultipart
+import smtplib
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
-import smtplib
-import socket
 
 from cabinet.mail import (
     DEFAULT_SMTP_MAX_RETRIES,

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from cabinet.cabinet import _parse_mail_recipients
 from cabinet.helpers import parse_config_bool
 from cabinet.log import (
     cabinet_log,
@@ -108,7 +110,7 @@ def test_cabinet_log_no_jsonl_when_loki_disabled(tmp_path):
     cabinet_log(cab, "plain", level="info", is_quiet=True)
 
     day_dir = tmp_path / datetime.now().strftime("%Y-%m-%d")
-    assert list(day_dir.glob("*.jsonl")) == []
+    assert not list(day_dir.glob("*.jsonl"))
 
 
 def test_cabinet_log_forced_folder_with_mongo_enabled(tmp_path):
@@ -164,8 +166,6 @@ def test_cabinet_log_query_issues_file_scan(tmp_path):
     def get_file_as_array(
         file_name, file_path="", strip=True, ignore_not_found=False
     ):
-        from pathlib import Path
-
         base = Path(file_path).expanduser()
         fp = base / file_name
         if not fp.is_file():
@@ -217,8 +217,6 @@ def test_cabinet_log_query_file_mode_since_accepts_asctime_without_fractional_se
 
 
 def test_parse_mail_recipients():
-    from cabinet.cabinet import _parse_mail_recipients
-
     assert _parse_mail_recipients(None) is None
     assert _parse_mail_recipients("  ") is None
     assert _parse_mail_recipients("a@b.com") == ["a@b.com"]
