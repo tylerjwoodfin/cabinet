@@ -105,8 +105,9 @@ class Cabinet:
         thread.join(timeout=timeout)
         if thread.is_alive():
             raise ConnectionFailure(ERROR_MONGODB_OPERATION_TIMEOUT)
-        if exception[0] is not None:
-            raise exception[0]
+        raised = exception[0]
+        if raised is not None:
+            raise raised
         return result[0]
 
     def _get_config(self, key=None, warn_missing=True):
@@ -614,8 +615,9 @@ class Cabinet:
                 self.cached_data = []
             return None
 
-        if exception[0] is not None:
-            raise exception[0]
+        raised = exception[0]
+        if raised is not None:
+            raise raised
 
         json_data = result[0]
 
@@ -1626,7 +1628,10 @@ def main():
         "-l",
         type=str,
         dest="log",
-        help="Log a message (local files only; optional JSONL for Promtail when logging.loki_enabled)",
+        help=(
+            "Log a message (local files only; optional JSONL for Promtail "
+            "when logging.loki_enabled)"
+        ),
     )
     parser.add_argument(
         "--level",
@@ -1781,7 +1786,7 @@ def main():
                 print("No matching log entries found")
         except FileNotFoundError as e:
             print(f"Error: {e}")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error querying logs: {e}")
     elif args.export:
         cab.export()

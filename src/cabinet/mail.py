@@ -313,7 +313,7 @@ class Mail:
                     level="error",
                 )
                 return False
-            except Exception as err:
+            except Exception as err:  # pylint: disable=broad-exception-caught
                 if not _is_transient_smtp_error(err):
                     self.cab.log(
                         f"SMTP send failed with non-retryable error: {err}",
@@ -339,10 +339,10 @@ class Mail:
                 if server:
                     try:
                         server.quit()
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         try:
                             server.close()
-                        except Exception:
+                        except Exception:  # pylint: disable=broad-exception-caught
                             pass
 
         return False

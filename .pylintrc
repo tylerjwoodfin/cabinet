@@ -46,6 +46,7 @@ ignore-imports=no
 [TYPECHECK]
 ignore-mixin-members=yes
 ignored-classes=SQLObject
+ignored-modules=pytest
 unsafe-load-any-extension=yes
 
 [VARIABLES]
