@@ -17,6 +17,31 @@ from cabinet.log import (
     loki_query_range,
 )
 
+_LOKI_LOG_RECORD = (
+    '{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"hello",'
+    '"tags":["t"],"source":{"file":"x.py","line":2},"hostname":"h"}'
+)
+_LOKI_WARNING_RECORD = (
+    '{"timestamp":"2024-01-01T12:00:00Z","level":"warning","message":"warn msg",'
+    '"tags":["backup"],"source":{"file":"tools/b.py","line":1},"hostname":"cloud"}'
+)
+_LOKI_INFO_SKIP_RECORD = (
+    '{"timestamp":"2024-01-01T15:00:00Z","level":"info","message":"skip",'
+    '"tags":[],"source":{"file":"c.py","line":1},"hostname":"cloud"}'
+)
+_LOKI_INFO_RECORD = (
+    '{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"i",'
+    '"tags":[],"source":{"file":"a","line":1},"hostname":"h"}'
+)
+_LOKI_ERROR_RECORD = (
+    '{"timestamp":"2024-01-01T13:00:00Z","level":"error","message":"e",'
+    '"tags":[],"source":{"file":"a","line":2},"hostname":"h"}'
+)
+_LOKI_QUERY_RECORD = (
+    '{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"x",'
+    '"tags":[],"source":{"file":"a","line":1},"hostname":"h"}'
+)
+
 
 def _cab(url: str = "http://127.0.0.1:3100"):
     return SimpleNamespace(
@@ -66,7 +91,7 @@ def test_loki_query_range_parses_streams():
                     "values": [
                         [
                             "1704110400000000000",
-                            '{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"hello","tags":["t"],"source":{"file":"x.py","line":2},"hostname":"h"}',
+                            _LOKI_LOG_RECORD,
                         ]
                     ],
                 }
@@ -102,11 +127,11 @@ def test_cabinet_log_query_documents_loki_filters():
                     "values": [
                         [
                             "1704110400000000000",
-                            '{"timestamp":"2024-01-01T12:00:00Z","level":"warning","message":"warn msg","tags":["backup"],"source":{"file":"tools/b.py","line":1},"hostname":"cloud"}',
+                            _LOKI_WARNING_RECORD,
                         ],
                         [
                             "1704110500000000000",
-                            '{"timestamp":"2024-01-01T15:00:00Z","level":"info","message":"skip","tags":[],"source":{"file":"c.py","line":1},"hostname":"cloud"}',
+                            _LOKI_INFO_SKIP_RECORD,
                         ],
                     ],
                 }
@@ -157,11 +182,11 @@ def test_cabinet_log_query_issues_loki_filters_levels():
                     "values": [
                         [
                             "1704110400000000000",
-                            '{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"i","tags":[],"source":{"file":"a","line":1},"hostname":"h"}',
+                            _LOKI_INFO_RECORD,
                         ],
                         [
                             "1704110500000000000",
-                            '{"timestamp":"2024-01-01T13:00:00Z","level":"error","message":"e","tags":[],"source":{"file":"a","line":2},"hostname":"h"}',
+                            _LOKI_ERROR_RECORD,
                         ],
                     ],
                 }
@@ -187,7 +212,7 @@ def test_cabinet_log_query_loki_returns_formatted_lines():
                     "values": [
                         [
                             "1704110400000000000",
-                            '{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"x","tags":[],"source":{"file":"a","line":1},"hostname":"h"}',
+                            _LOKI_QUERY_RECORD,
                         ],
                     ],
                 }
