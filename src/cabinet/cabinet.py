@@ -57,6 +57,34 @@ from .mail import Mail
 from . import log as log_module
 
 
+def _expand_dotted_path(parts: list[str] | tuple[str, ...]) -> list[str]:
+    """
+    Expand CLI path segments so ``taiga.api_root`` becomes ``['taiga', 'api_root']``.
+
+    Empty segments from consecutive or trailing dots are dropped.
+    """
+    expanded: list[str] = []
+    for part in parts:
+        if not isinstance(part, str):
+            expanded.append(part)
+            continue
+        if "." in part:
+            expanded.extend(segment for segment in part.split(".") if segment)
+        else:
+            expanded.append(part)
+    return expanded
+
+
+def _warn_missing_attribute(attribute: str) -> None:
+    """
+    Tell the operator a key was missing without writing a WARNING to log files / Loki.
+
+    Exploratory ``cabinet --get`` and optional-key lookups are normal; they should not
+    show up as warnings in Grafana.
+    """
+    print(f"WARNING: Attribute '{attribute}' is missing", file=sys.stderr)
+
+
 class Cabinet:
     """
     Cabinet class
@@ -993,7 +1021,9 @@ class Cabinet:
 
         Args:
             *attributes (str): A sequence of strings representing nested attributes.
-            warn_missing (bool, optional): Whether to warn if an attribute is missing.
+            warn_missing (bool, optional): Whether to print a stderr warning if an
+                attribute is missing. Does **not** write a WARNING log line (avoids
+                Loki noise from routine ``--get`` probes). Defaults to False.
             is_print (bool, optional): Whether to print the return value.
             force_cache_update (bool, optional): For MongoDB. Whether to force a fresh MongoDB call.
             return_type (Type[T], optional): The expected return type of the result.
@@ -1018,9 +1048,7 @@ class Cabinet:
                         result = result[attribute]
                     else:
                         if warn_missing:
-                            self.log(
-                                f"Attribute '{attribute}' is missing", level="warn"
-                            )
+                            _warn_missing_attribute(attribute)
                         return None
 
                 if is_print:
@@ -1056,7 +1084,7 @@ class Cabinet:
                     result = result[attribute]
                 else:
                     if warn_missing:
-                        self.log(f"Attribute '{attribute}' is missing", level="warn")
+                        _warn_missing_attribute(attribute)
                     return None
 
             if isinstance(result, str):
@@ -1086,7 +1114,10 @@ class Cabinet:
             storage_type: str = (
                 "cache or MongoDB" if self.mongodb_enabled else "local storage"
             )
-            self.log(f"'{attributes}' not found in {storage_type}", level="warn")
+            print(
+                f"WARNING: '{attributes}' not found in {storage_type}",
+                file=sys.stderr,
+            )
         return None
 
     def remove(self, *attribute: str, is_print: bool = False):
@@ -1585,7 +1616,11 @@ def main():
         help="(for -ef) Do not create file if it does not exist",
     )
     parser.add_argument(
-        "--get", "-g", dest="get", nargs="+", help="Get a property from MongoDB"
+        "--get",
+        "-g",
+        dest="get",
+        nargs="+",
+        help="Get a property (space- or dot-separated path, e.g. taiga api_root)",
     )
     parser.add_argument(
         "--put",
@@ -1740,17 +1775,19 @@ def main():
             is_print=True,
             warn_missing=True,
             force_cache_update=args.force_cache_update,
-            *args.get,
+            *_expand_dotted_path(args.get),
         )
     elif args.put:
-        attribute_values = args.put
-        cab.put(*attribute_values, is_print=True)
+        # Expand dotted path keys only; leave the final value intact (may contain dots).
+        *path_parts, value = args.put
+        put_args = _expand_dotted_path(path_parts) + [value]
+        cab.put(*put_args, is_print=True)
     elif args.append:
-        attribute_values = args.append
-        cab.append(*attribute_values, is_print=True)
+        *path_parts, value = args.append
+        append_args = _expand_dotted_path(path_parts) + [value]
+        cab.append(*append_args, is_print=True)
     elif args.remove:
-        attribute_values = args.remove
-        cab.remove(*attribute_values, is_print=True)
+        cab.remove(*_expand_dotted_path(args.remove), is_print=True)
     elif args.get_file:
         cab.get_file_as_array(file_name=args.get_file, file_path="", strip=args.strip)
     elif args.log:
