@@ -329,6 +329,8 @@ or terminal:
 
 ```bash
 cabinet -g employee Tyler salary
+# Dotted paths work too (expanded to nested keys):
+cabinet -g employee.Tyler.salary
 ```
 
 - optional: `--force-cache-update` to force a cache update
