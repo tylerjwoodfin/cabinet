@@ -9,73 +9,63 @@ on:
       - main
 
 jobs:
-  build-and-release:
+  # Same install, test, pex, and `python -m build` path as PR CI.
+  package-build:
+    uses: ./.github/workflows/package-build.yml
+
+  publish:
+    needs: package-build
     runs-on: ubuntu-latest
-
     steps:
-    # Checkout the repository
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # Set up Python
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
 
-    - name: Install package and run tests
-      run: |
-        pip install -e ".[dev]"
-        pytest tests/ -v
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cabinet-dist
 
-    # Install Pex
-    - name: Install Pex
-      run: pip install pex build twine
-
-    # Build Pex file
-    - name: Build Pex file
-      run: pex . -o cabinet.pex --script=cabinet
-
-    # Build PyPI package
-    - name: Build PyPI package
-      run: python -m build
-
-    # Create and push tag (before PyPI so a publish always has a corresponding tag)
-    - name: Create and push tag
-      id: create_tag
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        VERSION=$(grep -oP '^version\s*=\s*\K.+' setup.cfg)
-        TAG="v$VERSION"
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git fetch --tags --quiet origin 2>/dev/null || true
-        if git show-ref --verify --quiet "refs/tags/$TAG"; then
-          echo "Skipping tag create/push: $TAG already exists (same version as a previous release)."
+      - name: Create and push tag
+        id: create_tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep -oP '^version\s*=\s*\K.+' setup.cfg)
+          TAG="v$VERSION"
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git fetch --tags --quiet origin 2>/dev/null || true
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            echo "Skipping tag create/push: $TAG already exists (same version as a previous release)."
+            echo "tag=$TAG" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "Skipping tag push: origin already has $TAG; not creating a duplicate."
+            echo "tag=$TAG" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push https://x-access-token:${GITHUB_TOKEN}@github.com/tylerjwoodfin/cabinet.git "$TAG"
           echo "tag=$TAG" >> "$GITHUB_ENV"
-          exit 0
-        fi
-        if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
-          echo "Skipping tag push: origin already has $TAG; not creating a duplicate."
-          echo "tag=$TAG" >> "$GITHUB_ENV"
-          exit 0
-        fi
-        git tag "$TAG"
-        git push https://x-access-token:${GITHUB_TOKEN}@github.com/tylerjwoodfin/cabinet.git "$TAG"
-        echo "tag=$TAG" >> "$GITHUB_ENV"
 
-    # Publish to PyPI
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-      run: python -m twine upload dist/* --verbose
+      - name: Install twine
+        run: pip install twine
 
-    # Upload Pex file to GitHub Releases
-    - name: Upload Pex file to GitHub Releases
-      uses: ncipollo/release-action@v1
-      with:
-        tag: ${{ env.tag }}
-        artifacts: cabinet.pex
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: python -m twine upload dist/* --verbose
+
+      - name: Upload Pex file to GitHub Releases
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.tag }}
+          artifacts: cabinet.pex
+          token: ${{ secrets.GITHUB_TOKEN }}

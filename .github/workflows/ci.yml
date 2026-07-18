@@ -1,0 +1,10 @@
+# Run the same install/test/build path as the PyPI release, before merge.
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  package-build:
+    uses: ./.github/workflows/package-build.yml
