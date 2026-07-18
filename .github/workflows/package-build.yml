@@ -1,0 +1,48 @@
+# Shared package build used by PR CI and the main release workflow.
+# Keep publish/tag steps only in release.yml.
+name: Package build
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Match a clean runner (no ~/.config/cabinet) so interactive setup cannot hide failures.
+      - name: Install package and run tests
+        env:
+          HOME: ${{ runner.temp }}/cabinet-home
+        run: |
+          mkdir -p "$HOME"
+          pip install -e ".[dev]"
+          pytest tests/ -v
+
+      - name: Install build tools
+        run: pip install pex build twine
+
+      - name: Build Pex file
+        run: pex . -o cabinet.pex --script=cabinet
+
+      - name: Build PyPI package
+        run: python -m build
+
+      - name: Check PyPI package with twine
+        run: python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: cabinet-dist
+          path: |
+            dist/
+            cabinet.pex
+          if-no-files-found: error
