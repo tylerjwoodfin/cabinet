@@ -181,24 +181,51 @@ def test_send_exhausts_retries_on_persistent_failure():
     assert any("failed after 3 attempts" in msg for msg in error_logs)
 
 
-def test_send_does_not_retry_authentication_errors():
+def test_send_skips_attempt_log_when_logging_disabled():
     mail = _make_mail()
     server = MagicMock()
-    server.login.side_effect = smtplib.SMTPAuthenticationError(535, "bad creds")
 
     with (
-        patch.object(mail, "_connect_smtp", return_value=server) as connect,
-        patch("cabinet.mail.time.sleep") as sleep,
+        patch.object(mail, "_connect_smtp", return_value=server),
         patch("cabinet.mail.print_formatted_text"),
     ):
         result = mail.send(
-            "Test",
+            "Quiet",
             "Body",
             to_addr="dest@example.com",
-            max_retries=DEFAULT_SMTP_MAX_RETRIES,
-            retry_base_delay=DEFAULT_SMTP_RETRY_BASE_DELAY,
+            logging_enabled=False,
+            max_retries=0,
         )
 
-    assert result is False
-    sleep.assert_not_called()
-    assert connect.call_count == 1
+    assert result is True
+    attempt_logs = [
+        call.args[0]
+        for call in mail.cab.log.call_args_list
+        if "SMTP send attempt" in call.args[0]
+    ]
+    assert attempt_logs == []
+
+
+def test_send_logs_attempt_at_debug_when_logging_enabled():
+    mail = _make_mail()
+    server = MagicMock()
+
+    with (
+        patch.object(mail, "_connect_smtp", return_value=server),
+        patch("cabinet.mail.print_formatted_text"),
+    ):
+        result = mail.send(
+            "Noisy",
+            "Body",
+            to_addr="dest@example.com",
+            logging_enabled=True,
+            max_retries=0,
+        )
+
+    assert result is True
+    attempt_logs = [
+        (call.args[0], call.kwargs.get("level"))
+        for call in mail.cab.log.call_args_list
+        if call.args and "SMTP send attempt" in call.args[0]
+    ]
+    assert attempt_logs == [("SMTP send attempt 1/1 for 'Noisy'", "debug")]

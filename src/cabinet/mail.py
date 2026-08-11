@@ -273,10 +273,13 @@ class Mail:
         for attempt in range(1, max_attempts + 1):
             server = None
             try:
-                self.cab.log(
-                    f"SMTP send attempt {attempt}/{max_attempts} for {subject!r}",
-                    level="info",
-                )
+                # Attempt-start noise (esp. remindmail bulk sends) stays at debug
+                # and honors logging_enabled. Failures still warn/error below.
+                if logging_enabled:
+                    self.cab.log(
+                        f"SMTP send attempt {attempt}/{max_attempts} for {subject!r}",
+                        level="debug",
+                    )
                 server = self._connect_smtp(timeout)
                 self.cab.log(
                     f"Attempting SMTP login with username: {self.username}",

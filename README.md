@@ -250,7 +250,7 @@ cabinet -p edit todo value "~/path/to/whatever.md"
 - **`email.to`:** May be a single address **string**, comma-separated addresses in one string, or a JSON **array** of strings (or mix)—same rules as the CLI **`--to`** / **`Mail.send(..., to_addr=...)`**.
 - **`email.smtp_max_retries`** (optional): Number of retries after a transient SMTP failure. Default **`3`** (4 attempts total including the first).
 - **`email.smtp_retry_base_delay`** (optional): Base delay in **seconds** for exponential backoff between retries. Default **`120`** (2 minutes). Delays double each retry: 2 min, 4 min, 8 min, …
-- Transient failures (timeouts, disconnects, connection errors) are retried automatically; authentication and configuration errors are not. Each attempt is logged via **`cab.log()`** (`info` on attempt start, `warning` before a retry, `error` when exhausted).
+- Transient failures (timeouts, disconnects, connection errors) are retried automatically; authentication and configuration errors are not. Attempt starts are logged at **`debug`** when `logging_enabled=True`; retries use **`warning`**, and exhaustion uses **`error`**. Pass **`logging_enabled=False`** to skip attempt-start / send-event logs (callers like remindmail do this for bulk sends).
 - In Cabinet (`cabinet -e`), add the `email` object to make your settings file look like this example:
 
 file:
