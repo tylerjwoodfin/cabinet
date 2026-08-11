@@ -275,7 +275,7 @@ class Mail:
             try:
                 self.cab.log(
                     f"SMTP send attempt {attempt}/{max_attempts} for {subject!r}",
-                    level="info",
+                    level="debug",
                 )
                 server = self._connect_smtp(timeout)
                 self.cab.log(
