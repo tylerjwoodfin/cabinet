@@ -29,6 +29,7 @@ This release changes how logging works. Plan upgrades accordingly.
     - [Logging and Loki (optional)](#logging-and-loki-optional)
     - [editfile() shortcuts](#edit_file-shortcuts)
     - [`mail` (configuration)](#mail-configuration)
+    - [`telegram` (configuration)](#telegram-configuration)
   - [Examples](#examples)
     - `[put](#put)`
     - `[get](#get)`
@@ -38,6 +39,7 @@ This release changes how logging works. Plan upgrades accordingly.
     - `[edit](#edit)`
     - `[edit_file](#edit_file)`
     - [Sending mail](#sending-mail)
+    - [Sending Telegram](#sending-telegram)
     - `[log](#log)`
     - `[log_query](#log_query)`
     - `[log_query_issues](#log_query_issues)`
@@ -52,6 +54,7 @@ This release changes how logging works. Plan upgrades accordingly.
 - Log messages to **local** files under `path_dir_log` (and optional **local `*.jsonl`** for that host’s Promtail). `**cab.log_query()**` / `**cab.log_query_issues()**` read **files**; `**cab.log_query*_loki()`** reads **Loki** when `**logging.loki_url`** is set. MongoDB is only for **Cabinet data**, not logs.
 - Store Cabinet **data** in **MongoDB** or **`~/.cabinet/data.json`**; edit it like a JSON document (**`-e`** / **`cab.edit_cabinet()`**), export snapshots (**`--export`**), and use **`--remove`** only with MongoDB enabled
 - Send mail from the terminal (SMTP **`email.port`** accepts a number or numeric string; **`email.to`** may be a string, comma-separated addresses, or a JSON array—same idea as **`--to`** on the CLI). Transient SMTP failures are retried with exponential backoff and logged to Cabinet.
+- Send Telegram messages from Python (`cabinet.telegram('message')`) or the terminal (`cabinet --telegram "message"`) using **`telegram.bot_token`** and **`telegram.target`** in Cabinet data
 - Library for interactive command-line interface components using `prompt_toolkit`
 
 ### Breaking change in 2.0.0
@@ -127,6 +130,7 @@ Run `cabinet --help` for the full list (wording matches your installed version).
 | `--query` / `-q` | Search **log files** under `path_dir_log` (optional log name; default today’s file) |
 | `--query-tags`, `--query-path`, `--query-hostname`, `--query-level`, `--query-date`, `--query-message` | Filters for `--query` |
 | `--mail`, `--subject` / `-s`, `--body` / `-b`, `--to` / `-t` | Send mail; `--to` may be comma-separated addresses |
+| `--telegram` | Send a Telegram message (uses `telegram.bot_token` and `telegram.target`) |
 | `--version` / `-v` | Print package version |
 
 `--query` matches Python **`Cabinet.log_query()`** (file-based logs only, not the Cabinet data store).
@@ -277,6 +281,31 @@ set from terminal:
 cabinet -p email from throwaway@example.com
 cabinet -p email from_pw example
 ...
+```
+
+### `telegram` (configuration)
+
+- Create a bot with [BotFather](https://t.me/BotFather) and copy the token. The chat id (`target`) is the destination user or group; this is the same key diary-llm uses.
+- Store both values in Cabinet data (not `config.json`), the same way SMTP settings live under `email`.
+- **`telegram.bot_token`:** Bot API token. **`telegram.token`** is accepted as an alias.
+- **`telegram.target`:** Chat id (string or number). **`telegram.chat_id`** is accepted as an alias.
+
+In Cabinet (`cabinet -e`), add the `telegram` object:
+
+```json
+{
+    "telegram": {
+        "bot_token": "123456:ABC-DEF",
+        "target": "1234567890"
+    }
+}
+```
+
+set from terminal:
+
+```bash
+cabinet -p telegram bot_token 123456:ABC-DEF
+cabinet -p telegram target 1234567890
 ```
 
 ## Examples
@@ -518,6 +547,30 @@ cabinet --mail -s "Hi" -b "Hello" -t "one@example.com, two@example.com"
 ```
 
 If **`--to`** / **`-t`** is omitted, **`email.to`** from Cabinet data is used (see [mail configuration](#mail-configuration)).
+
+### Sending Telegram
+
+```python
+import cabinet
+
+# Returns True on success, False on failure (missing config, HTTP error, …)
+cabinet.telegram("Dinner is ready")
+
+from cabinet import Telegram
+
+Telegram().send("Dinner is ready")
+
+# Optional per-call chat override
+Telegram().send("Just you", target="1234567890")
+```
+
+terminal:
+
+```bash
+cabinet --telegram "Dinner is ready"
+```
+
+If **`target`** is omitted, **`telegram.target`** from Cabinet data is used (see [telegram configuration](#telegram-configuration)).
 
 `**cab.log()**` / `**cabinet --log**` write only to **local files** (classic `**.log`** lines). There are **no** network calls. If `**logging.loki_enabled`** is true in `config.json`, each event also appends a structured line to a matching **local `.jsonl`** file for **Promtail on that host** to ship to **central Loki**. Failures to write are printed to **stderr** and do not propagate as exceptions from `log()`.
 
