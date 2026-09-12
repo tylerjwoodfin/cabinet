@@ -54,6 +54,7 @@ from .constants import (
     WARN_NETWORK_TIMEOUT_NO_CACHE,
 )
 from .mail import Mail
+from .telegram import Telegram, telegram
 from . import log as log_module
 
 
@@ -1750,6 +1751,14 @@ def main():
     )
     mail_group.add_argument("--to", "-t", dest="to_addr", help='The "to" email address')
 
+    telegram_group = parser.add_argument_group("Telegram")
+    telegram_group.add_argument(
+        "--telegram",
+        dest="telegram",
+        metavar="MESSAGE",
+        help="Send a Telegram message",
+    )
+
     parser.add_argument(
         "-v",
         "--version",
@@ -1833,6 +1842,8 @@ def main():
             args.body,
             to_addr=_parse_mail_recipients(args.to_addr),
         )
+    elif args.telegram:
+        telegram(args.telegram)
     else:
         parser.print_help()
 
