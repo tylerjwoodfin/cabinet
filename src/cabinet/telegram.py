@@ -1,25 +1,39 @@
 """
 Cabinet Telegram
 
-Send a Telegram message using the Bot API.
+Send a Telegram message the same way diary-llm does: ``openclaw message send``.
+Optional Bot API is used when ``telegram.bot_token`` is set.
 
-Credentials live in Cabinet data under ``telegram``, similar to ``email`` for Mail.
-``telegram.target`` matches diary-llm's chat id key.
+``telegram.target`` (chat id) lives in Cabinet data, similar to ``email`` for Mail.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from prompt_toolkit import HTML, print_formatted_text
 
 import cabinet
 
 TELEGRAM_API_ROOT = "https://api.telegram.org"
-DEFAULT_TIMEOUT = 10
+DEFAULT_CHANNEL = "telegram"
+DEFAULT_OPENCLAW_BIN = "openclaw"
+DEFAULT_TIMEOUT = 60
+DIARY_LLM_OPENCLAW = Path.home() / "git/tools/diary-llm/scripts/openclaw-gateway"
+
+
+def _default_openclaw_bin() -> str:
+    """Prefer diary-llm's Gateway-bundled CLI when present (Homebrew can lag)."""
+    if DIARY_LLM_OPENCLAW.is_file() and os.access(DIARY_LLM_OPENCLAW, os.X_OK):
+        return str(DIARY_LLM_OPENCLAW)
+    return DEFAULT_OPENCLAW_BIN
 
 
 def _config_str(cab: cabinet.Cabinet, *keys: str) -> str | None:
@@ -36,16 +50,19 @@ def _config_str(cab: cabinet.Cabinet, *keys: str) -> str | None:
 
 class Telegram:
     """
-    Sends Telegram messages via ``https://api.telegram.org``.
+    Sends Telegram messages via OpenClaw, or the Bot API when a token is set.
 
-    Reads ``telegram.bot_token`` (or ``telegram.token``) and ``telegram.target``
-    (or ``telegram.chat_id``) from Cabinet data.
+    Reads ``telegram.target`` (or ``telegram.chat_id``) from Cabinet data.
+    Optional: ``telegram.channel``, ``telegram.openclaw_bin``,
+    ``telegram.bot_token`` (or ``telegram.token``).
     """
 
     def __init__(self, cab: cabinet.Cabinet | None = None):
         self.cab = cab if cab is not None else cabinet.Cabinet()
-        self.bot_token = _config_str(self.cab, "bot_token", "token")
         self.target = _config_str(self.cab, "target", "chat_id")
+        self.channel = _config_str(self.cab, "channel") or DEFAULT_CHANNEL
+        self.openclaw_bin = _config_str(self.cab, "openclaw_bin") or _default_openclaw_bin()
+        self.bot_token = _config_str(self.cab, "bot_token", "token")
 
     def send(
         self,
@@ -59,30 +76,22 @@ class Telegram:
         Send ``message`` to ``target``, or to ``telegram.target`` when unset.
 
         Returns:
-            True if Telegram accepted the message, False otherwise.
+            True if the message was accepted, False otherwise.
         """
         text = (message or "").strip()
         chat_id = str(target).strip() if target is not None else self.target
-        error = None
         if not text:
-            error = "Telegram message is empty"
-        elif not chat_id:
-            error = "cabinet -> telegram -> target is unset"
-        elif not self.bot_token:
-            error = "cabinet -> telegram -> bot_token is unset"
-        if error:
-            self.cab.log(error, level="error")
+            self.cab.log("Telegram message is empty", level="error")
+            return False
+        if not chat_id:
+            self.cab.log("cabinet -> telegram -> target is unset", level="error")
             return False
 
-        parsed = self._post_send_message(chat_id, text, timeout)
-        if parsed is None:
-            return False
-        if not parsed.get("ok"):
-            description = str(parsed.get("description") or parsed)[:300]
-            self.cab.log(
-                f"Telegram API rejected the message: {description}",
-                level="error",
-            )
+        if self.bot_token:
+            ok = self._send_bot_api(chat_id, text, timeout)
+        else:
+            ok = self._send_openclaw(chat_id, text, timeout)
+        if not ok:
             return False
 
         if logging_enabled:
@@ -96,10 +105,49 @@ class Telegram:
             )
         return True
 
-    def _post_send_message(
-        self, chat_id: str, text: str, timeout: int
-    ) -> dict | None:
-        """POST sendMessage; return parsed JSON or None after logging a failure."""
+    def _send_openclaw(self, chat_id: str, text: str, timeout: int) -> bool:
+        """Send via ``openclaw message send``, matching diary-llm."""
+        binary = shutil.which(self.openclaw_bin) or self.openclaw_bin
+        cmd = [
+            binary,
+            "message",
+            "send",
+            "--channel",
+            self.channel,
+            "--target",
+            chat_id,
+            "--message",
+            text,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except FileNotFoundError:
+            self.cab.log(
+                f"{self.openclaw_bin} not found; set telegram.bot_token "
+                "or install OpenClaw",
+                level="error",
+            )
+            return False
+        except subprocess.TimeoutExpired:
+            self.cab.log("OpenClaw Telegram send timed out", level="error")
+            return False
+        if proc.returncode == 0:
+            return True
+        err = (proc.stderr or proc.stdout or "").strip()[:300]
+        self.cab.log(
+            f"OpenClaw Telegram send failed: {err or proc.returncode}",
+            level="error",
+        )
+        return False
+
+    def _send_bot_api(self, chat_id: str, text: str, timeout: int) -> bool:
+        """POST sendMessage to api.telegram.org when a bot token is configured."""
         url = f"{TELEGRAM_API_ROOT}/bot{self.bot_token}/sendMessage"
         payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
         request = urllib.request.Request(
@@ -118,17 +166,23 @@ class Telegram:
                 f"Telegram HTTP {err.code}: {detail[:300]}",
                 level="error",
             )
-            return None
+            return False
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as err:
             if isinstance(err, json.JSONDecodeError):
                 self.cab.log("Telegram returned a non-JSON response", level="error")
             else:
                 self.cab.log(f"Telegram send failed: {err}", level="error")
-            return None
-        if not isinstance(parsed, dict):
-            self.cab.log("Telegram returned a non-JSON object", level="error")
-            return None
-        return parsed
+            return False
+        if not isinstance(parsed, dict) or not parsed.get("ok"):
+            description = ""
+            if isinstance(parsed, dict):
+                description = str(parsed.get("description") or parsed)[:300]
+            self.cab.log(
+                f"Telegram API rejected the message: {description}",
+                level="error",
+            )
+            return False
+        return True
 
 
 def telegram(

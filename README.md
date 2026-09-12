@@ -54,7 +54,7 @@ This release changes how logging works. Plan upgrades accordingly.
 - Log messages to **local** files under `path_dir_log` (and optional **local `*.jsonl`** for that host’s Promtail). `**cab.log_query()**` / `**cab.log_query_issues()**` read **files**; `**cab.log_query*_loki()`** reads **Loki** when `**logging.loki_url`** is set. MongoDB is only for **Cabinet data**, not logs.
 - Store Cabinet **data** in **MongoDB** or **`~/.cabinet/data.json`**; edit it like a JSON document (**`-e`** / **`cab.edit_cabinet()`**), export snapshots (**`--export`**), and use **`--remove`** only with MongoDB enabled
 - Send mail from the terminal (SMTP **`email.port`** accepts a number or numeric string; **`email.to`** may be a string, comma-separated addresses, or a JSON array—same idea as **`--to`** on the CLI). Transient SMTP failures are retried with exponential backoff and logged to Cabinet.
-- Send Telegram messages from Python (`cabinet.telegram('message')`) or the terminal (`cabinet --telegram "message"`) using **`telegram.bot_token`** and **`telegram.target`** in Cabinet data
+- Send Telegram messages from Python (`cabinet.telegram('message')`) or the terminal (`cabinet --telegram "message"`) via OpenClaw using **`telegram.target`** (optional **`telegram.bot_token`** uses the Bot API instead)
 - Library for interactive command-line interface components using `prompt_toolkit`
 
 ### Breaking change in 2.0.0
@@ -130,7 +130,7 @@ Run `cabinet --help` for the full list (wording matches your installed version).
 | `--query` / `-q` | Search **log files** under `path_dir_log` (optional log name; default today’s file) |
 | `--query-tags`, `--query-path`, `--query-hostname`, `--query-level`, `--query-date`, `--query-message` | Filters for `--query` |
 | `--mail`, `--subject` / `-s`, `--body` / `-b`, `--to` / `-t` | Send mail; `--to` may be comma-separated addresses |
-| `--telegram` | Send a Telegram message (uses `telegram.bot_token` and `telegram.target`) |
+| `--telegram` | Send a Telegram message (uses `telegram.target`; OpenClaw by default) |
 | `--version` / `-v` | Print package version |
 
 `--query` matches Python **`Cabinet.log_query()`** (file-based logs only, not the Cabinet data store).
@@ -285,17 +285,17 @@ cabinet -p email from_pw example
 
 ### `telegram` (configuration)
 
-- Create a bot with [BotFather](https://t.me/BotFather) and copy the token. The chat id (`target`) is the destination user or group; this is the same key diary-llm uses.
-- Store both values in Cabinet data (not `config.json`), the same way SMTP settings live under `email`.
-- **`telegram.bot_token`:** Bot API token. **`telegram.token`** is accepted as an alias.
+- By default Cabinet sends through **OpenClaw** (`openclaw message send`), the same path diary-llm uses. You only need a chat id.
 - **`telegram.target`:** Chat id (string or number). **`telegram.chat_id`** is accepted as an alias.
+- **`telegram.channel`** (optional): OpenClaw channel. Default **`telegram`**.
+- **`telegram.openclaw_bin`** (optional): OpenClaw executable. Defaults to diary-llm's Gateway wrapper when that script exists, otherwise **`openclaw`**.
+- **`telegram.bot_token`** (optional): If set, send via the Telegram Bot API instead of OpenClaw. **`telegram.token`** is accepted as an alias.
 
 In Cabinet (`cabinet -e`), add the `telegram` object:
 
 ```json
 {
     "telegram": {
-        "bot_token": "123456:ABC-DEF",
         "target": "1234567890"
     }
 }
@@ -304,7 +304,6 @@ In Cabinet (`cabinet -e`), add the `telegram` object:
 set from terminal:
 
 ```bash
-cabinet -p telegram bot_token 123456:ABC-DEF
 cabinet -p telegram target 1234567890
 ```
 
