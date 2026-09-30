@@ -60,7 +60,7 @@ from . import log as log_module
 
 def _expand_dotted_path(parts: list[str] | tuple[str, ...]) -> list[str]:
     """
-    Expand CLI path segments so ``taiga.api_root`` becomes ``['taiga', 'api_root']``.
+    Expand CLI path segments so ``vikunja.api_root`` becomes ``['vikunja', 'api_root']``.
 
     Empty segments from consecutive or trailing dots are dropped.
     """
@@ -1621,7 +1621,7 @@ def main():
         "-g",
         dest="get",
         nargs="+",
-        help="Get a property (space- or dot-separated path, e.g. taiga api_root)",
+        help="Get a property (space- or dot-separated path, e.g. vikunja api_root)",
     )
     parser.add_argument(
         "--put",
