@@ -29,8 +29,8 @@ def _local_cab(tmp_path, data: dict) -> Cabinet:
 
 
 def test_expand_dotted_path_splits_segments():
-    assert _expand_dotted_path(["taiga.api_root"]) == ["taiga", "api_root"]
-    assert _expand_dotted_path(["taiga", "api_root"]) == ["taiga", "api_root"]
+    assert _expand_dotted_path(["vikunja.api_root"]) == ["vikunja", "api_root"]
+    assert _expand_dotted_path(["vikunja", "api_root"]) == ["vikunja", "api_root"]
     assert _expand_dotted_path(["a.b", "c"]) == ["a", "b", "c"]
     assert _expand_dotted_path(["a..b."]) == ["a", "b"]
 
